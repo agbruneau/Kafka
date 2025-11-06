@@ -1,64 +1,98 @@
-# Kafka Crash Course
+# Cours accéléré sur Kafka
 
-This project demonstrates a simple Kafka setup using Docker Compose, with a Python producer and consumer.
+Ce projet présente une configuration Kafka simple utilisant Docker Compose, avec un producteur et un consommateur Python.
 
-## Prerequisites
+## Structure du projet
 
-- Docker and Docker Compose
-- Python 3
-- `pip` for installing Python dependencies
+- `producer.py` : Un script Python qui envoie un exemple de message au topic Kafka `orders`.
+- `tracker.py` : Un script Python qui s'abonne au topic `orders` et affiche les messages reçus.
+- `docker-compose.yaml` : Un fichier de configuration Docker Compose pour démarrer un broker Kafka.
+- `requirements.txt` : Une liste des dépendances Python requises pour ce projet.
+- `.github/workflows/ci.yml` : Un pipeline d'intégration continue qui exécute les tests et le linting à chaque push ou pull request.
+- `tests/test_smoke.py` : Une suite de tests de base pour s'assurer que les modules `producer` et `tracker` peuvent être importés.
 
-## Setup
+## Prérequis
 
-1. **Start the Kafka broker:**
+- **Docker et Docker Compose** : Pour exécuter l'environnement conteneurisé.
+- **Python 3.9 ou supérieur** : Pour exécuter les scripts du producteur et du consommateur. `pip` est également requis pour l'installation des dépendances, et il est généralement inclus dans les installations de Python.
+
+## Installation
+
+1. **Démarrer le broker Kafka :**
 
    ```bash
    docker-compose up -d
    ```
 
-2. **Install the Python dependency:**
+2. **Installer les dépendances Python :**
 
    ```bash
-   pip3 install confluent-kafka
+   pip install -r requirements.txt
    ```
 
-## Usage
+## Utilisation
 
-1. **Run the consumer:**
+1. **Lancer le consommateur :**
 
-   Open a terminal and run the following command to start the consumer. The consumer will wait for messages on the `orders` topic.
+   Ouvrez un terminal et exécutez la commande suivante pour démarrer le consommateur. Le consommateur attendra des messages sur le topic `orders`.
 
    ```bash
    python3 tracker.py
    ```
 
-2. **Run the producer:**
+2. **Lancer le producteur :**
 
-   Open another terminal and run the following command to send a sample message to the `orders` topic.
+   Ouvrez un autre terminal et exécutez la commande suivante pour envoyer un exemple de message au topic `orders`.
 
    ```bash
    python3 producer.py
    ```
 
-   You should see the message appear in the consumer's terminal.
+   Vous devriez voir le message apparaître dans le terminal du consommateur.
 
-## Kafka Commands
+## Développement
 
-Here are some useful commands for interacting with Kafka:
+Ce projet utilise `pytest` pour les tests et `flake8` pour le linting.
 
-- **List all topics:**
+- **Exécuter les tests :**
+
+  ```bash
+  pytest
+  ```
+
+- **Exécuter le linting :**
+
+  ```bash
+  flake8 .
+  ```
+
+## Intégration continue (CI/CD)
+
+Ce projet utilise GitHub Actions pour l'intégration continue. Le pipeline est défini dans le fichier `.github/workflows/ci.yml` et exécute les étapes suivantes :
+
+- Installe les dépendances Python.
+- Exécute le linting avec `flake8`.
+- Exécute les tests avec `pytest`.
+
+Le pipeline est déclenché à chaque `push` et `pull request` sur la branche `main`.
+
+## Commandes Kafka
+
+Voici quelques commandes utiles pour interagir avec Kafka :
+
+- **Lister tous les topics :**
 
   ```bash
   docker exec -it kafka kafka-topics --list --bootstrap-server localhost:9092
   ```
 
-- **Describe a topic:**
+- **Décrire un topic :**
 
   ```bash
   docker exec -it kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic orders
   ```
 
-- **View all events in a topic:**
+- **Voir tous les événements dans un topic :**
 
   ```bash
   docker exec -it kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic orders --from-beginning

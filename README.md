@@ -17,6 +17,42 @@ Ce projet a pour but de fournir une démonstration pratique d'un pipeline Kafka 
 
 ## Installation
 
+### Environnement Virtuel (Recommandé)
+
+Pour éviter les conflits de dépendances et maintenir un environnement de développement propre, il est fortement recommandé d'utiliser un environnement virtuel Python.
+
+1. **Créez un environnement virtuel :**
+
+   ```bash
+   python3 -m venv .venv
+   ```
+
+2. **Activez l'environnement virtuel :**
+
+   - **Linux/macOS :**
+
+     ```bash
+     source .venv/bin/activate
+     ```
+
+   - **Windows :**
+
+     ```bash
+     .venv\Scripts\activate
+     ```
+
+3. **Installez les dépendances dans l'environnement virtuel :**
+
+   Une fois l'environnement virtuel activé, installez les dépendances :
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+   Désormais, toutes les dépendances seront installées dans l'environnement virtuel, et non au niveau global.
+
+### Étapes d'Installation
+
 1. **Démarrer le broker Kafka :**
 
    ```bash
@@ -24,6 +60,8 @@ Ce projet a pour but de fournir une démonstration pratique d'un pipeline Kafka 
    ```
 
 2. **Installer les dépendances Python :**
+
+   Si vous n'utilisez pas d'environnement virtuel, vous pouvez installer les dépendances directement :
 
    ```bash
    pip install -r requirements.txt

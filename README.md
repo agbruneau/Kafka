@@ -103,6 +103,26 @@ Ce projet utilise `pytest` pour les tests et `flake8` pour le linting.
   flake8 .
   ```
 
+## Tests de Bout en Bout
+
+Le projet inclut des scripts pour automatiser les tests de bout en bout. Ces tests simulent un flux de travail complet en démarrant l'infrastructure, en exécutant le producteur et le consommateur, puis en nettoyant l'environnement.
+
+- **Démarrer les tests de bout en bout :**
+
+  Ce script configure l'environnement de test complet, exécute les scripts et enregistre la sortie du consommateur dans `tracker.log`.
+
+  ```bash
+  ./start_e2e_tests.sh
+  ```
+
+- **Arrêter les tests de bout en bout :**
+
+  Ce script nettoie l'environnement de test en arrêtant les conteneurs Docker, en terminant le processus du consommateur et en supprimant les fichiers temporaires.
+
+  ```bash
+  ./stop_e2e_tests.sh
+  ```
+
 ## Documentation
 
 Le code est entièrement documenté en suivant les conventions de style Google pour les docstrings Python. Chaque fonction publique, méthode et classe possède une docstring détaillée qui explique son but, ses paramètres et sa valeur de retour.

@@ -3,6 +3,14 @@ import json
 from confluent_kafka import Consumer
 
 def main():
+    """Initialise un consommateur Kafka, s'abonne à un topic et traite les messages.
+
+    Le consommateur est configuré pour se connecter à un broker Kafka sur `localhost:9092`
+    et s'abonne au topic `orders`. Il écoute en continu les nouveaux messages et
+    affiche les informations sur les commandes reçues. La boucle du consommateur peut être
+    arrêtée avec une interruption clavier (Ctrl+C), ce qui garantit une
+    fermeture propre du consommateur.
+    """
     consumer_config = {
         "bootstrap.servers": "localhost:9092",
         "group.id": "order-tracker",

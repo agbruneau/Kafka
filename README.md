@@ -1,15 +1,15 @@
-# Cours accéléré sur Kafka
+# Démonstration d'un Pipeline Kafka
 
-Ce projet présente une configuration Kafka simple utilisant Docker Compose, avec un producteur et un consommateur Python.
+Ce projet a pour but de fournir une démonstration pratique d'un pipeline Kafka simple, orchestré avec Docker Compose, et comprenant un producteur ainsi qu'un consommateur développés en Python.
 
-## Structure du projet
+## Structure du Projet
 
-- `producer.py` : Un script Python qui envoie un exemple de message au topic Kafka `orders`.
-- `tracker.py` : Un script Python qui s'abonne au topic `orders` et affiche les messages reçus.
-- `docker-compose.yaml` : Un fichier de configuration Docker Compose pour démarrer un broker Kafka.
-- `requirements.txt` : Une liste des dépendances Python requises pour ce projet.
-- `.github/workflows/ci.yml` : Un pipeline d'intégration continue qui exécute les tests et le linting à chaque push ou pull request.
-- `tests/test_smoke.py` : Une suite de tests de base pour s'assurer que les modules `producer` et `tracker` peuvent être importés.
+- `producer.py` : Un script Python qui simule la création d'une commande et l'envoie sous forme de message au topic Kafka `orders`.
+- `tracker.py` : Un script Python qui s'abonne au topic `orders`, écoute les messages entrants et les affiche en temps réel dans la console.
+- `docker-compose.yaml` : Un fichier de configuration Docker Compose qui provisionne et lance un broker Kafka dans un conteneur.
+- `requirements.txt` : La liste des dépendances Python nécessaires au fonctionnement du producteur et du consommateur.
+- `.github/workflows/ci.yml` : Un pipeline d'intégration continue configuré avec GitHub Actions, qui valide le code par des tests et du linting à chaque modification.
+- `tests/test_smoke.py` : Une suite de tests d'intégration de base qui s'assure que les modules `producer` et `tracker` peuvent être importés sans erreur.
 
 ## Prérequis
 
@@ -57,7 +57,7 @@ Ce projet utilise `pytest` pour les tests et `flake8` pour le linting.
 - **Exécuter les tests :**
 
   ```bash
-  pytest
+  PYTHONPATH=. python3 -m pytest
   ```
 
 - **Exécuter le linting :**
@@ -65,6 +65,10 @@ Ce projet utilise `pytest` pour les tests et `flake8` pour le linting.
   ```bash
   flake8 .
   ```
+
+## Documentation
+
+Le code est entièrement documenté en suivant les conventions de style Google pour les docstrings Python. Chaque fonction publique, méthode et classe possède une docstring détaillée qui explique son but, ses paramètres et sa valeur de retour.
 
 ## Intégration continue (CI/CD)
 

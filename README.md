@@ -8,7 +8,6 @@ Ce projet a pour but de fournir une démonstration pratique d'un pipeline Kafka 
 - `tracker.py` : Un script Python qui s'abonne au topic `orders`, écoute les messages entrants et les affiche en temps réel dans la console.
 - `docker-compose.yaml` : Un fichier de configuration Docker Compose qui provisionne et lance un broker Kafka dans un conteneur.
 - `requirements.txt` : La liste des dépendances Python nécessaires au fonctionnement du producteur et du consommateur.
-- `.github/workflows/ci.yml` : Un pipeline d'intégration continue configuré avec GitHub Actions, qui valide le code par des tests et du linting à chaque modification.
 - `tests/test_smoke.py` : Une suite de tests d'intégration de base qui s'assure que les modules `producer` et `tracker` peuvent être importés sans erreur.
 
 ## Prérequis
@@ -69,16 +68,6 @@ Ce projet utilise `pytest` pour les tests et `flake8` pour le linting.
 ## Documentation
 
 Le code est entièrement documenté en suivant les conventions de style Google pour les docstrings Python. Chaque fonction publique, méthode et classe possède une docstring détaillée qui explique son but, ses paramètres et sa valeur de retour.
-
-## Intégration continue (CI/CD)
-
-Ce projet utilise GitHub Actions pour l'intégration continue. Le pipeline est défini dans le fichier `.github/workflows/ci.yml` et exécute les étapes suivantes :
-
-- Installe les dépendances Python.
-- Exécute le linting avec `flake8`.
-- Exécute les tests avec `pytest`.
-
-Le pipeline est déclenché à chaque `push` et `pull request` sur la branche `main`.
 
 ## Commandes Kafka
 

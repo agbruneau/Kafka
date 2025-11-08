@@ -1,0 +1,7 @@
+# Dépendances pour le système Pub-Sub avec Kafka en Python
+
+# Client Kafka pour Python
+kafka-python==2.0.2
+
+# Pour une meilleure gestion des logs (optionnel)
+colorlog==6.8.0

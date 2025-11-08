@@ -6,6 +6,9 @@ docker compose up -d
 echo "⏳ Attente de 30 secondes pour que Kafka démarre complètement..."
 sleep 30
 
+echo "🐍 Installation des dépendances Python..."
+pip3 install -r requirements.txt
+
 echo "🟢 Démarrage du consommateur (tracker.py) en arrière-plan..."
 python3 -u tracker.py &
 

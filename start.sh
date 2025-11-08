@@ -7,7 +7,7 @@ echo "⏳ Attente de 30 secondes pour que Kafka démarre complètement..."
 sleep 30
 
 echo "🟢 Démarrage du consommateur (tracker.py) en arrière-plan..."
-python3 -u tracker.py > tracker.log 2>&1 &
+python3 -u tracker.py &
 
 echo "▶️ Démarrage du producteur (producer.py)..."
 python3 producer.py

@@ -10,7 +10,7 @@ echo "🐍 Installation des dépendances Python..."
 pip3 install -r requirements.txt
 
 echo "🟢 Démarrage du consommateur (tracker.py) en arrière-plan..."
-python3 -u tracker.py &
+python3 -u tracker.py > tracker.log &
 
 echo "▶️ Démarrage du producteur (producer.py)..."
 python3 producer.py

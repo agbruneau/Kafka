@@ -3,15 +3,16 @@ Ce script Python, `producer.py`, est conçu pour fonctionner comme un producteur
 Il envoie des messages JSON sérialisés à un topic Kafka spécifié.
 
 Le script est configuré pour se connecter à un serveur Kafka fonctionnant sur `localhost:9092`.
-Il envoie un message prédéfini au topic `orders` et attend une confirmation de livraison.
+Il envoie en continu des messages prédéfinis au topic `orders` et attend une confirmation de livraison.
 
 Fonctionnalités:
 - Configuration et initialisation d'un producteur Kafka.
-- Envoi d'un message unique au format JSON.
-- Rapport de livraison pour confirmer que le message a été bien reçu par le broker Kafka.
+- Envoi de messages en continu au format JSON.
+- Rapport de livraison pour confirmer que les messages ont été bien reçus par le broker Kafka.
 """
 
 import json
+import time
 import uuid
 from confluent_kafka import Producer
 
@@ -36,8 +37,8 @@ def main():
     """
     Point d'entrée principal du script producteur.
 
-    Initialise le producteur Kafka, envoie un message de commande au topic 'orders'
-    et attend la confirmation de livraison avant de terminer.
+    Initialise le producteur Kafka, envoie des messages de commande en boucle
+    au topic 'orders' et attend la confirmation de livraison avant de terminer.
     """
     producer_config = {
         "bootstrap.servers": "localhost:9092"
@@ -45,24 +46,37 @@ def main():
 
     producer = Producer(producer_config)
 
-    order = {
-        "order_id": str(uuid.uuid4()),
-        "user": "lara",
-        "item": "frozen yogurt",
-        "quantity": 10
-    }
-
-    value = json.dumps(order).encode("utf-8")
-
     try:
-        producer.produce(
-            topic="orders",
-            value=value,
-            callback=delivery_report
-        )
-        producer.flush()
-    except BufferError:
-        print("La file d'attente locale du producteur est pleine, attente...")
+        while True:
+            order = {
+                "order_id": str(uuid.uuid4()),
+                "user": "lara",
+                "item": "frozen yogurt",
+                "quantity": 10
+            }
+
+            value = json.dumps(order).encode("utf-8")
+
+            try:
+                producer.produce(
+                    topic="orders",
+                    value=value,
+                    callback=delivery_report
+                )
+                # Attendre que les messages soient envoyés et les callbacks traités
+                producer.poll(0)
+            except BufferError:
+                print("La file d'attente locale du producteur est pleine, attente...")
+                producer.flush()
+
+            # Attendre 2 secondes avant d'envoyer le prochain message
+            time.sleep(2)
+
+    except KeyboardInterrupt:
+        print("\n🔴 Arrêt du producteur")
+    finally:
+        # S'assurer que tous les messages restants sont envoyés avant de fermer
+        print("⏳ Envoi des messages restants...")
         producer.flush()
 
 if __name__ == '__main__':

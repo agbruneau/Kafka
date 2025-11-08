@@ -1,3 +1,0 @@
-confluent-kafka
-pytest
-flake8

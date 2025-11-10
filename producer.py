@@ -65,6 +65,7 @@ def main():
                 )
                 # Attendre que les messages soient envoyés et les callbacks traités
                 producer.poll(0)
+                producer.flush(1)  # Forcer l'envoi du message
             except BufferError:
                 print("La file d'attente locale du producteur est pleine, attente...")
                 producer.flush()

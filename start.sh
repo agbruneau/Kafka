@@ -6,6 +6,9 @@ docker compose up -d
 echo "⏳ Attente de 30 secondes pour que Kafka démarre complètement..."
 sleep 30
 
+echo "🔥 Création du topic 'orders' dans Kafka..."
+docker exec kafka kafka-topics --create --topic orders --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
+
 echo "🐍 Installation des dépendances Python..."
 pip3 install -r requirements.txt
 

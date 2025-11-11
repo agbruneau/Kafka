@@ -25,16 +25,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// Order représente une commande à envoyer à Kafka
+// Order représente une commande client avec tous ses détails.
+// Cette structure est utilisée pour sérialiser les données de commande en JSON
+// avant de les envoyer à Kafka.
 type Order struct {
-	OrderID  string `json:"order_id"`
-	User     string `json:"user"`
-	Item     string `json:"item"`
-	Quantity int    `json:"quantity"`
-	Sequence int    `json:"sequence"`
+	OrderID  string `json:"order_id"`  // OrderID est l'identifiant unique de la commande.
+	User     string `json:"user"`      // User est l'identifiant du client qui a passé la commande.
+	Item     string `json:"item"`      // Item est le nom du produit commandé.
+	Quantity int    `json:"quantity"`  // Quantity est le nombre d'unités du produit commandé.
+	Sequence int    `json:"sequence"`  // Sequence est un numéro séquentiel pour suivre l'ordre des messages.
 }
 
-// deliveryReport traite les rapports de livraison des messages
+// deliveryReport gère et affiche les rapports de livraison des messages Kafka.
+// Elle écoute sur un canal d'événements Kafka et affiche une confirmation
+// si le message a été livré avec succès ou une erreur dans le cas contraire.
+//
+// Paramètres:
+//   deliveryChan (chan kafka.Event): Le canal sur lequel les événements de livraison sont envoyés par le producteur Kafka.
 func deliveryReport(deliveryChan chan kafka.Event) {
 	for e := range deliveryChan {
 		m := e.(*kafka.Message)
@@ -50,6 +57,11 @@ func deliveryReport(deliveryChan chan kafka.Event) {
 	}
 }
 
+// main initialise et exécute le producteur Kafka.
+// Il configure le producteur, gère les signaux d'arrêt (Ctrl+C),
+// et entre dans une boucle pour envoyer des messages de commande en continu
+// au topic Kafka 'orders'. La fonction assure également que tous les messages
+// en attente sont envoyés avant la fermeture du programme.
 func main() {
 	// Configuration du producteur
 	producerConfig := kafka.ConfigMap{

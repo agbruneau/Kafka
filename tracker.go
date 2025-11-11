@@ -27,15 +27,22 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-// Order représente une commande reçue de Kafka
+// Order représente une commande client avec tous ses détails.
+// Cette structure est utilisée pour désérialiser les données JSON reçues de Kafka
+// en un objet Go manipulable.
 type Order struct {
-	OrderID  string `json:"order_id"`
-	User     string `json:"user"`
-	Item     string `json:"item"`
-	Quantity int    `json:"quantity"`
-	Sequence int    `json:"sequence"`
+	OrderID  string `json:"order_id"`  // OrderID est l'identifiant unique de la commande.
+	User     string `json:"user"`      // User est l'identifiant du client qui a passé la commande.
+	Item     string `json:"item"`      // Item est le nom du produit commandé.
+	Quantity int    `json:"quantity"`  // Quantity est le nombre d'unités du produit commandé.
+	Sequence int    `json:"sequence"`  // Sequence est un numéro séquentiel pour suivre l'ordre des messages.
 }
 
+// main initialise et exécute le consommateur Kafka.
+// Il configure le consommateur pour se connecter au broker Kafka,
+// s'abonne au topic 'orders', et entre dans une boucle de scrutation
+// pour recevoir et traiter les messages. La fonction gère également
+// les signaux d'arrêt pour une fermeture propre.
 func main() {
 	// Configuration du consommateur
 	consumerConfig := kafka.ConfigMap{

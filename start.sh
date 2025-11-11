@@ -9,20 +9,19 @@ sleep 30
 echo "🔥 Création du topic 'orders' dans Kafka..."
 docker exec kafka kafka-topics --create --topic orders --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 
-echo "🐍 Création de l'environnement virtuel Python..."
-if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
-fi
-source .venv/bin/activate
+echo "🔧 Installation des dépendances Go..."
+go mod download
 
-echo "🐍 Installation des dépendances Python..."
-pip install -r requirements.txt
+echo "🔨 Compilation des programmes Go..."
+mkdir -p bin
+go build -o bin/producer producer.go
+go build -o bin/tracker tracker.go
 
-echo "🟢 Démarrage du consommateur (tracker.py) en arrière-plan..."
-python -u tracker.py > tracker.log &
+echo "🟢 Démarrage du consommateur (tracker) en arrière-plan..."
+./bin/tracker > tracker.log 2>&1 &
 
-echo "▶️ Démarrage du producteur (producer.py)..."
-python producer.py
+echo "▶️ Démarrage du producteur (producer)..."
+./bin/producer
 
 echo "✅ Le producteur a terminé. Le consommateur tourne en arrière-plan."
 echo "Pour arrêter l'environnement, exécutez ./stop.sh"

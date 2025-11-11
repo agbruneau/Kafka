@@ -77,8 +77,36 @@ func main() {
 
 	fmt.Println("🟢 Le producteur est en cours d'exécution...")
 
+	orderTemplates := []struct {
+		User     string
+		Item     string
+		Quantity int
+	}{
+		{"lara", "frozen yogurt", 10},
+		{"maxime", "espresso", 2},
+		{"amélie", "croissant", 6},
+		{"youssef", "bagel au saumon", 4},
+		{"claire", "salade césar", 3},
+		{"mohamed", "sandwich club", 5},
+		{"ines", "latte", 1},
+		{"paul", "smoothie mangue", 2},
+		{"emma", "wrap poulet", 7},
+		{"lucas", "cookie chocolat", 12},
+		{"nora", "jus d'orange", 8},
+		{"adam", "pancakes", 9},
+		{"sara", "thé vert", 4},
+		{"victor", "brownie", 6},
+		{"leila", "quiche lorraine", 3},
+		{"hugo", "tarte aux pommes", 5},
+		{"maya", "granola", 11},
+		{"antoine", "muffin myrtilles", 2},
+		{"julie", "yaourt grec", 7},
+		{"enzo", "burrito végétarien", 4},
+	}
+
 	// Boucle d'envoi de messages
 	sequence := 1
+	templateIndex := 0
 	run := true
 	for run {
 		select {
@@ -87,11 +115,12 @@ func main() {
 			run = false
 		default:
 			// Création d'une nouvelle commande
+			template := orderTemplates[templateIndex%len(orderTemplates)]
 			order := Order{
 				OrderID:  uuid.New().String(),
-				User:     "lara",
-				Item:     "frozen yogurt",
-				Quantity: 10,
+				User:     template.User,
+				Item:     template.Item,
+				Quantity: template.Quantity,
 				Sequence: sequence,
 			}
 
@@ -113,6 +142,7 @@ func main() {
 			}
 
 			sequence++
+			templateIndex++
 			// Attendre 2 secondes avant d'envoyer le prochain message
 			time.Sleep(2 * time.Second)
 		}

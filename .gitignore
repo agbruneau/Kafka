@@ -1,2 +1,4 @@
 tracker.log
-.venv/
+# Binaires Go
+producer
+tracker

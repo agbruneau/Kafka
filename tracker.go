@@ -33,6 +33,7 @@ type Order struct {
 	User     string `json:"user"`
 	Item     string `json:"item"`
 	Quantity int    `json:"quantity"`
+	Sequence int    `json:"sequence"`
 }
 
 func main() {
@@ -93,7 +94,7 @@ func main() {
 			}
 
 			// Affichage de la commande
-			fmt.Printf("📦 Commande reçue: %d x %s de %s\n", order.Quantity, order.Item, order.User)
+			fmt.Printf("📦 Commande #%d reçue: %d x %s de %s\n", order.Sequence, order.Quantity, order.Item, order.User)
 		}
 	}
 }

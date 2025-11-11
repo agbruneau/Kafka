@@ -31,6 +31,7 @@ type Order struct {
 	User     string `json:"user"`
 	Item     string `json:"item"`
 	Quantity int    `json:"quantity"`
+	Sequence int    `json:"sequence"`
 }
 
 // deliveryReport traite les rapports de livraison des messages
@@ -77,6 +78,7 @@ func main() {
 	fmt.Println("🟢 Le producteur est en cours d'exécution...")
 
 	// Boucle d'envoi de messages
+	sequence := 1
 	run := true
 	for run {
 		select {
@@ -90,6 +92,7 @@ func main() {
 				User:     "lara",
 				Item:     "frozen yogurt",
 				Quantity: 10,
+				Sequence: sequence,
 			}
 
 			// Sérialisation en JSON
@@ -109,6 +112,7 @@ func main() {
 				fmt.Printf("Erreur lors de la production du message: %v\n", err)
 			}
 
+			sequence++
 			// Attendre 2 secondes avant d'envoyer le prochain message
 			time.Sleep(2 * time.Second)
 		}

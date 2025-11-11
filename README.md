@@ -1,61 +1,101 @@
-# Projet de Démonstration Kafka avec Golang
+# Pub/Sub événementiel avec Golang et Kafka
 
-Ce projet est une démonstration simple d'un écosystème de messagerie utilisant Apache Kafka. Il comprend un producteur (`producer.go`) qui envoie des messages et un consommateur (`tracker.go`) qui les reçoit. L'ensemble de l'environnement est géré via Docker.
+Cette démonstration illustre une architecture événementielle complète en Go autour d'Apache Kafka. Elle couvre de nombreux patrons : **Publish/Subscribe**, **Event Streaming**, **Event-Carried State Transfer**, **CQRS**, **Event Sourcing**, **Saga (orchestration + chorégraphie)**, **Choreography**, **Dead Letter Queue**, **Competing Consumers**, **Aggregator**, **Circuit Breaker** et **Service Orchestration**.
+
+## Services Go
+
+| Binaire | Rôle principal |
+|---------|----------------|
+| `cmd/producer` | Orchestrateur Saga : publie les commandes et événements métier, gère les retries et envoie les messages vers la DLQ en cas d'échec. |
+| `cmd/tracker` | Service chorégraphié : consomme `orders.events`, applique des validations idempotentes et publie des compensations si nécessaire. |
+| `cmd/aggregator` | Agrégateur d'événements : maintient des agrégats par utilisateur et publie des snapshots sur `orders.aggregates`. |
+| `cmd/query-api` | Projection de lecture (CQRS) : restitue les agrégats via HTTP et suit les mises à jour publiées par l’agrégateur. |
+| `cmd/dlq-inspector` | Lecture de la dead-letter queue `orders.dlq`. |
+| `cmd/replayer` | Relecture Event Sourcing : rejoue `orders.events` pour reconstruire une projection persistée. |
+
+Tous les services réutilisent `internal/bus` (accès Kafka + circuit breaker), `internal/events` (contrats d’événements), `internal/storage` (projections en mémoire) et `internal/metrics` (compteurs + serveur HTTP optionnel).
 
 ## Prérequis
 
-Avant de commencer, assurez-vous d'avoir installé les outils suivants sur votre machine :
+- **Docker** et **Docker Compose**
+- **Go 1.22 ou supérieur**
 
--   **Docker** et **Docker Compose**
--   **Go 1.21 ou supérieur**
-
-## Démarrage de l'Application
-
-Pour lancer l'application, exécutez le script `start.sh` :
+## Démarrage
 
 ```bash
 ./start.sh
 ```
 
-Ce script effectue les actions suivantes :
-1.  Démarre les conteneurs Docker pour Kafka.
-2.  Crée le topic Kafka `orders`.
-3.  Télécharge les dépendances Go et compile les programmes.
-4.  Lance le consommateur (`tracker`) en arrière-plan.
-5.  Lance le producteur (`producer`) au premier plan.
+Le script :
 
-## Arrêt de l'Application
+1. Démarre Kafka via `docker compose`.
+2. Crée les topics nécessaires (`orders.events`, `orders.commands`, `orders.dlq`, `orders.aggregates`).
+3. Compile tous les binaires dans `./bin`.
+4. Lance en arrière-plan : `tracker`, `aggregator`, `query-api`, `dlq-inspector`.
+5. Exécute le producteur orienteur de saga au premier plan.
 
-Pour arrêter tous les composants de l'application (conteneurs Docker et programmes Go), exécutez le script `stop.sh` :
+Les logs sont disponibles dans `./logs` et les PID dans `./pids`.
+
+### Services exposés
+
+- **API de lecture (CQRS)** : http://localhost:8080
+  - `GET /aggregates` – liste des agrégats
+  - `GET /aggregates/{user}` – détail d’un utilisateur
+  - `GET /metrics` – snapshot JSON des compteurs
+- **Serveur de métriques** (optionnels) :
+  - Agrégateur : `AGGREGATOR_METRICS_PORT=9101`
+  - Tracker : `TRACKER_METRICS_PORT=9102`
+  - DLQ Inspector : `DLQ_METRICS_PORT=9103` (à définir avant lancement)
+
+Chaque service supporte des workers concurrents via les variables `*_WORKERS`.
+
+## Arrêt
 
 ```bash
 ./stop.sh
 ```
 
-## Commandes Utiles pour Kafka
+Ce script tue les processus Go lancés, supprime les binaires générés et arrête les conteneurs Docker.
 
-Voici quelques commandes `docker exec` pour interagir directement avec Kafka.
+## Tests
 
-### Lister les Topics
+Un test d’intégration (`internal/tests/integration_test.go`) démarre la stack Docker Compose, publie un événement via `internal/bus` et vérifie sa consommation.
 
-Pour voir la liste de tous les topics Kafka :
+```bash
+go test ./...
+```
+
+> ⚠️ Le test est ignoré si Docker est absent ou si `go test -short` est utilisé.
+
+## Topics Kafka
+
+| Topic | Description |
+|-------|-------------|
+| `orders.commands` | Intentions (CQRS – écriture), utilisées par l’orchestrateur et les compensations. |
+| `orders.events` | Flux principal d’événements métier (Saga, Event Streaming). |
+| `orders.aggregates` | Snapshots agrégés pour la lecture (Aggregator + CQRS). |
+| `orders.dlq` | Dead Letter Queue pour diagnostics et réinjections manuelles. |
+
+## Gestion des pannes
+
+- **Circuit breaker** (`internal/bus`) limite les appels Kafka lors de pannes.
+- **Retries exponentiels** côté producteur avec déroutage vers `orders.dlq`.
+- **Compensations** orchestrées/par chorégraphie via `cmd/tracker`.
+
+## Relecture Event Sourcing
+
+```bash
+./bin/replayer -output replay-projections.json
+```
+
+Le fichier généré contient les agrégats reconstruits depuis `orders.events`.
+
+## Commandes utiles
 
 ```bash
 docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+docker exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic orders.events --from-beginning
+docker exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic orders.dlq --from-beginning
 ```
 
-### Décrire un Topic
-
-Pour obtenir des informations détaillées sur un topic (par exemple, `orders`) :
-
-```bash
-docker exec kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic orders
-```
-
-### Écouter les Messages d'un Topic
-
-Pour consommer les messages du topic `orders` directement depuis la ligne de commande et voir ce qui s'y passe en temps réel :
-
-```bash
-docker exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic orders --from-beginning
-```
+Ces commandes permettent de suivre les flux en parallèle de l’application Go.

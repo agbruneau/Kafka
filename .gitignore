@@ -1,2 +1,23 @@
-tracker.log
+# Binaires Go
+producer
+tracker
+
+# Fichiers de log
+*.log
+
+# Environnement virtuel Python (obsolète)
 .venv/
+
+# Répertoire de modules Go (local)
+vendor/
+
+# Fichiers de l'IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Fichiers système
+.DS_Store
+Thumbs.db

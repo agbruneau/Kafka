@@ -1,13 +1,13 @@
-# Projet de Démonstration Kafka avec Python
+# Projet de Démonstration Kafka avec Go
 
-Ce projet est une démonstration simple d'un écosystème de messagerie utilisant Apache Kafka. Il comprend un producteur (`producer.py`) qui envoie des messages et un consommateur (`tracker.py`) qui les reçoit. L'ensemble de l'environnement est géré via Docker.
+Ce projet est une démonstration simple d'un écosystème de messagerie utilisant Apache Kafka. Il comprend un producteur (`producer.go`) qui envoie des messages et un consommateur (`tracker.go`) qui les reçoit. L'ensemble de l'environnement est géré via Docker.
 
 ## Prérequis
 
 Avant de commencer, assurez-vous d'avoir installé les outils suivants sur votre machine :
 
 -   **Docker** et **Docker Compose**
--   **Python 3**
+-   **Go 1.21** ou version ultérieure
 
 ## Démarrage de l'Application
 
@@ -20,13 +20,13 @@ Pour lancer l'application, exécutez le script `start.sh` :
 Ce script effectue les actions suivantes :
 1.  Démarre les conteneurs Docker pour Kafka.
 2.  Crée le topic Kafka `orders`.
-3.  Met en place un environnement virtuel Python et installe les dépendances.
-4.  Lance le consommateur (`tracker.py`) en arrière-plan.
-5.  Lance le producteur (`producer.py`) au premier plan.
+3.  Compile les programmes Go (`producer` et `tracker`).
+4.  Lance le consommateur (`tracker`) en arrière-plan.
+5.  Lance le producteur (`producer`) au premier plan.
 
 ## Arrêt de l'Application
 
-Pour arrêter tous les composants de l'application (conteneurs Docker et scripts Python), exécutez le script `stop.sh` :
+Pour arrêter tous les composants de l'application (conteneurs Docker et programmes Go), exécutez le script `stop.sh` :
 
 ```bash
 ./stop.sh

@@ -183,6 +183,61 @@ func (l *Logger) LogError(message string, err error, metadata map[string]interfa
 	l.Log(LogLevelERROR, message, metadata)
 }
 
+// LogRawMessage écrit un log pour un message brut reçu de Kafka (même en cas d'erreur de désérialisation)
+func (l *Logger) LogRawMessage(level LogLevel, message string, kafkaMsg *kafka.Message, deserializationError error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Préparer les métadonnées Kafka
+	kafkaMetadata := make(map[string]interface{})
+	if kafkaMsg != nil {
+		if kafkaMsg.TopicPartition.Topic != nil {
+			kafkaMetadata["kafka_topic"] = *kafkaMsg.TopicPartition.Topic
+		}
+		kafkaMetadata["kafka_partition"] = kafkaMsg.TopicPartition.Partition
+		kafkaMetadata["kafka_offset"] = kafkaMsg.TopicPartition.Offset
+		if kafkaMsg.Key != nil {
+			kafkaMetadata["kafka_key"] = string(kafkaMsg.Key)
+		}
+		if !kafkaMsg.Timestamp.IsZero() {
+			kafkaMetadata["kafka_timestamp"] = kafkaMsg.Timestamp.Format(time.RFC3339)
+		}
+	}
+
+	metadata := map[string]interface{}{
+		"kafka": kafkaMetadata,
+	}
+
+	// Ajouter le message brut
+	if kafkaMsg != nil && kafkaMsg.Value != nil {
+		metadata["raw_message"] = string(kafkaMsg.Value)
+		metadata["raw_message_size"] = len(kafkaMsg.Value)
+	}
+
+	// Ajouter l'erreur de désérialisation si présente
+	if deserializationError != nil {
+		metadata["deserialization_error"] = deserializationError.Error()
+	}
+
+	entry := LogEntry{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Level:     level,
+		Message:   message,
+		Service:   "order-tracker",
+		Metadata:  metadata,
+	}
+
+	if deserializationError != nil {
+		entry.Error = deserializationError.Error()
+	}
+
+	if err := l.encoder.Encode(entry); err != nil {
+		log.Printf("Erreur lors de l'écriture du log: %v", err)
+	}
+
+	l.file.Sync()
+}
+
 // Close ferme le fichier de log
 func (l *Logger) Close() error {
 	l.mu.Lock()
@@ -277,21 +332,21 @@ func main() {
 				continue
 			}
 
+			// IMPORTANT: Logger TOUS les messages reçus AVANT la désérialisation
+			// pour s'assurer qu'aucun message n'est perdu, même en cas d'erreur
+			globalLogger.LogRawMessage(LogLevelINFO, "Message reçu de Kafka", msg, nil)
+
 			// Désérialisation du message
 			var order Order
 			err = json.Unmarshal(msg.Value, &order)
 			if err != nil {
-				globalLogger.LogError("Erreur lors de la désérialisation du message", err, map[string]interface{}{
-					"topic":     *msg.TopicPartition.Topic,
-					"partition": msg.TopicPartition.Partition,
-					"offset":    msg.TopicPartition.Offset,
-					"raw_size":  len(msg.Value),
-				})
+				// Logger le message brut avec l'erreur de désérialisation
+				globalLogger.LogRawMessage(LogLevelERROR, "Erreur lors de la désérialisation du message", msg, err)
 				fmt.Printf("Erreur lors de la désérialisation: %v\n", err)
 				continue
 			}
 
-			// Log de la réception de la commande avec le contenu complet du message
+			// Log de la réception de la commande avec le contenu complet du message (structure enrichie)
 			globalLogger.LogOrder(LogLevelINFO, "Commande reçue et traitée", order, msg)
 
 			// Affichage enrichi de la commande avec l'état complet (Event Carried State Transfer)

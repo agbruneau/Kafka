@@ -67,7 +67,14 @@ Si vous préférez exécuter chaque composant séparément, suivez ces étapes :
 
 ## Observabilité et Logging
 
-Le système de tracking (`tracker.go`) génère des logs structurés au format JSON dans le fichier `tracker.log`. Ces logs permettent une observabilité complète du système.
+Le système de tracking (`tracker.go`) génère des logs structurés au format JSON dans le fichier `tracker.log`. **Chaque message reçu de Kafka est automatiquement loggé**, garantissant une traçabilité complète et une observabilité totale du système.
+
+### Garantie de Journalisation
+
+- **Tous les messages reçus sont loggés** : Chaque message Kafka est enregistré dans `tracker.log` dès sa réception, avant même la désérialisation
+- **Messages valides** : Loggés deux fois - une fois en format brut, une fois avec la structure enrichie
+- **Messages invalides** : Loggés avec le message brut et l'erreur de désérialisation pour faciliter le débogage
+- **Aucune perte** : Aucun message n'est perdu, même en cas d'erreur de traitement
 
 ### Format des Logs
 
@@ -133,6 +140,16 @@ grep 'Commande reçue' tracker.log | jq '.metadata.kafka'
 
 # Reconstruire une commande complète depuis les logs
 grep 'Commande reçue' tracker.log | jq 'select(.order_id == "votre-order-id") | .metadata.order_full' | jq
+
+# Lister tous les messages bruts reçus (y compris ceux avec erreur de désérialisation)
+grep 'Message reçu de Kafka' tracker.log | jq -r '.metadata.raw_message'
+
+# Compter les messages reçus vs les commandes traitées
+echo "Messages reçus: $(grep -c 'Message reçu de Kafka' tracker.log)"
+echo "Commandes traitées: $(grep -c 'Commande reçue et traitée' tracker.log)"
+
+# Trouver les messages qui ont échoué à la désérialisation
+grep 'Erreur lors de la désérialisation' tracker.log | jq
 ```
 
 Sans `jq` :

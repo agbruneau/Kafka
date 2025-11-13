@@ -30,8 +30,8 @@ go mod download
 
 # Étape 5: Lancement du consommateur (tracker) en arrière-plan
 echo "🟢 Lancement du consommateur (tracker) en arrière-plan..."
-go run tracker.go &
+go run tracker.go order.go &
 
 # Étape 6: Lancement du producteur (producer) au premier plan
 echo "🟢 Lancement du producteur (producer) au premier plan..."
-go run producer.go
+go run producer.go order.go

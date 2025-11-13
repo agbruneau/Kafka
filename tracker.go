@@ -21,22 +21,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
-
-// Order représente une commande client avec tous ses détails.
-// Cette structure est utilisée pour désérialiser les données JSON reçues de Kafka
-// en un objet Go manipulable.
-type Order struct {
-	OrderID  string `json:"order_id"`  // OrderID est l'identifiant unique de la commande.
-	User     string `json:"user"`      // User est l'identifiant du client qui a passé la commande.
-	Item     string `json:"item"`      // Item est le nom du produit commandé.
-	Quantity int    `json:"quantity"`  // Quantity est le nombre d'unités du produit commandé.
-	Sequence int    `json:"sequence"`  // Sequence est un numéro séquentiel pour suivre l'ordre des messages.
-}
 
 // main initialise et exécute le consommateur Kafka.
 // Il configure le consommateur pour se connecter au broker Kafka,
@@ -67,6 +57,7 @@ func main() {
 	}
 
 	fmt.Println("🟢 Le consommateur est en cours d'exécution et abonné au topic 'orders'")
+	fmt.Println("📡 Mode: Event Carried State Transfer (ECST) - État complet dans chaque message")
 
 	// Gestion de l'interruption propre (Ctrl+C)
 	sigchan := make(chan os.Signal, 1)
@@ -100,8 +91,55 @@ func main() {
 				continue
 			}
 
-			// Affichage de la commande
-			fmt.Printf("📦 Commande #%d reçue: %d x %s de %s\n", order.Sequence, order.Quantity, order.Item, order.User)
+			// Affichage enrichi de la commande avec l'état complet (Event Carried State Transfer)
+			fmt.Println("\n" + strings.Repeat("=", 80))
+			fmt.Printf("📦 COMMANDE #%d - État complet reçu (ECST)\n", order.Sequence)
+			fmt.Println(strings.Repeat("-", 80))
+
+			// Informations de base
+			fmt.Printf("🆔 ID Commande: %s\n", order.OrderID)
+			fmt.Printf("📊 Statut: %s\n", order.Status)
+			fmt.Printf("🕐 Timestamp: %s\n", order.Metadata.Timestamp)
+			fmt.Printf("📌 Version: %s | Type: %s | Source: %s\n", order.Metadata.Version, order.Metadata.EventType, order.Metadata.Source)
+			fmt.Printf("🔗 Correlation ID: %s\n", order.Metadata.CorrelationID)
+
+			// Informations client
+			fmt.Println("\n👤 INFORMATIONS CLIENT:")
+			fmt.Printf("   • ID: %s | Nom: %s\n", order.CustomerInfo.CustomerID, order.CustomerInfo.Name)
+			fmt.Printf("   • Email: %s | Téléphone: %s\n", order.CustomerInfo.Email, order.CustomerInfo.Phone)
+			fmt.Printf("   • Adresse: %s\n", order.CustomerInfo.Address)
+			fmt.Printf("   • Niveau de fidélité: %s\n", order.CustomerInfo.LoyaltyLevel)
+
+			// Articles commandés
+			fmt.Println("\n🛒 ARTICLES COMMANDÉS:")
+			for i, item := range order.Items {
+				fmt.Printf("   %d. %s (ID: %s)\n", i+1, item.ItemName, item.ItemID)
+				fmt.Printf("      Quantité: %d | Prix unitaire: %.2f %s | Total: %.2f %s\n",
+					item.Quantity, item.UnitPrice, order.Currency, item.TotalPrice, order.Currency)
+			}
+
+			// Statut de l'inventaire
+			fmt.Println("\n📦 STATUT DE L'INVENTAIRE:")
+			for i, inv := range order.InventoryStatus {
+				stockStatus := "✅ En stock"
+				if !inv.InStock {
+					stockStatus = "❌ Rupture de stock"
+				}
+				fmt.Printf("   %d. %s (ID: %s)\n", i+1, inv.ItemName, inv.ItemID)
+				fmt.Printf("      %s | Disponible: %d | Réservé: %d | Entrepôt: %s\n",
+					stockStatus, inv.AvailableQty, inv.ReservedQty, inv.Warehouse)
+			}
+
+			// Détails financiers
+			fmt.Println("\n💰 DÉTAILS FINANCIERS:")
+			fmt.Printf("   • Sous-total: %.2f %s\n", order.SubTotal, order.Currency)
+			fmt.Printf("   • Taxes (TVA): %.2f %s\n", order.Tax, order.Currency)
+			fmt.Printf("   • Frais de livraison: %.2f %s\n", order.ShippingFee, order.Currency)
+			fmt.Printf("   • TOTAL: %.2f %s\n", order.Total, order.Currency)
+			fmt.Printf("   • Méthode de paiement: %s\n", order.PaymentMethod)
+			fmt.Printf("   • Adresse de livraison: %s\n", order.ShippingAddress)
+
+			fmt.Println(strings.Repeat("=", 80))
 		}
 	}
 }

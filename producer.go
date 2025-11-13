@@ -122,7 +122,7 @@ func main() {
 	for run {
 		select {
 		case <-sigchan:
-			fmt.Println("\n🔴 Arrêt du producteur")
+			fmt.Println("\n⚠️  Signal d'arrêt reçu - envoi des messages restants...")
 			run = false
 		default:
 			// Création d'une nouvelle commande enrichie (Event Carried State Transfer)

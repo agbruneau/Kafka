@@ -480,37 +480,50 @@ func main() {
 
 	// Boucle de consommation
 	run := true
+	shutdownRequested := false
+	var shutdownTime time.Time
+
 	for run {
 		select {
 		case <-sigchan:
-			// Log d'arrêt avec statistiques finales
-			metrics := systemMetrics.GetMetrics()
-			uptime := time.Since(metrics.StartTime)
+			// Signal d'arrêt reçu - continuer à traiter les messages en cours
+			if !shutdownRequested {
+				shutdownRequested = true
+				shutdownTime = time.Now()
 
-			var successRate float64
-			if metrics.MessagesReceived > 0 {
-				successRate = float64(metrics.MessagesProcessed) / float64(metrics.MessagesReceived) * 100
+				globalLogger.Log(LogLevelINFO, "Signal d'arrêt reçu - traitement des messages en cours", map[string]interface{}{
+					"signal": "SIGINT/SIGTERM",
+				})
+
+				fmt.Println("\n⚠️  Signal d'arrêt reçu - traitement des messages en cours...")
+				fmt.Println("   (Les messages en attente seront traités avant l'arrêt)")
+			}
+		default:
+			// Si l'arrêt est demandé et qu'on n'a pas reçu de message depuis 5 secondes, arrêter
+			if shutdownRequested {
+				timeSinceShutdown := time.Since(shutdownTime)
+				if timeSinceShutdown > 5*time.Second {
+					// Aucun message reçu depuis 5 secondes après le signal - arrêter proprement
+					run = false
+					break
+				}
 			}
 
-			globalLogger.Log(LogLevelINFO, "Arrêt du consommateur demandé", map[string]interface{}{
-				"signal":                     "SIGINT/SIGTERM",
-				"uptime_seconds":             int64(uptime.Seconds()),
-				"total_messages_received":    metrics.MessagesReceived,
-				"total_messages_processed":   metrics.MessagesProcessed,
-				"total_messages_failed":      metrics.MessagesFailed,
-				"final_success_rate_percent": fmt.Sprintf("%.2f", successRate),
-				"shutdown_time":              time.Now().UTC().Format(time.RFC3339),
-			})
-
-			fmt.Println("\n🔴 Arrêt du consommateur")
-			run = false
-		default:
 			// Poll pour recevoir des messages (timeout de 1 seconde)
 			msg, err := consumer.ReadMessage(1000 * time.Millisecond)
 			if err != nil {
 				// Timeout ou erreur temporaire
 				kafkaErr, ok := err.(kafka.Error)
 				if ok && kafkaErr.Code() == kafka.ErrTimedOut {
+					// Si l'arrêt est demandé et qu'on a un timeout, vérifier si on doit arrêter
+					if shutdownRequested {
+						timeSinceShutdown := time.Since(shutdownTime)
+						// Si on a attendu 3 secondes sans message après le signal, arrêter
+						if timeSinceShutdown > 3*time.Second {
+							run = false
+							break
+						}
+					}
 					continue
 				}
 				// Log de l'erreur (msg peut être nil en cas d'erreur)
@@ -557,6 +570,10 @@ func main() {
 			// Mettre à jour les métriques de succès
 			if msg != nil {
 				systemMetrics.IncrementMessagesProcessed(int64(msg.TopicPartition.Offset))
+				// Si on est en mode shutdown et qu'on a traité un message, réinitialiser le timer
+				if shutdownRequested {
+					shutdownTime = time.Now()
+				}
 			}
 
 			// Affichage enrichi de la commande avec l'état complet (Event Carried State Transfer)
@@ -620,12 +637,20 @@ func main() {
 		successRate = float64(metrics.MessagesProcessed) / float64(metrics.MessagesReceived) * 100
 	}
 
+	shutdownDuration := time.Duration(0)
+	if shutdownRequested {
+		shutdownDuration = time.Since(shutdownTime)
+	}
+
 	globalLogger.Log(LogLevelINFO, "Consommateur arrêté proprement", map[string]interface{}{
 		"uptime_seconds":             int64(uptime.Seconds()),
 		"total_messages_received":    metrics.MessagesReceived,
 		"total_messages_processed":   metrics.MessagesProcessed,
 		"total_messages_failed":      metrics.MessagesFailed,
 		"final_success_rate_percent": fmt.Sprintf("%.2f", successRate),
+		"shutdown_duration_seconds":  int64(shutdownDuration.Seconds()),
 		"shutdown_time":              time.Now().UTC().Format(time.RFC3339),
 	})
+
+	fmt.Println("✅ Tous les messages en cours ont été traités")
 }

@@ -34,7 +34,11 @@ La manière la plus simple de lancer l'application est d'utiliser les scripts fo
     ```bash
     ./stop.sh
     ```
-    Ce script arrête proprement les programmes Go et supprime les conteneurs Docker.
+    Ce script arrête proprement les programmes Go en permettant le traitement complet des messages en cours :
+    - Envoie SIGTERM aux processus (arrêt gracieux)
+    - Attend jusqu'à 10 secondes pour que tous les messages soient traités
+    - Force l'arrêt uniquement si nécessaire après le délai
+    - Supprime ensuite les conteneurs Docker
 
 ### Manuellement (Sans les Scripts)
 

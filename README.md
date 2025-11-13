@@ -79,7 +79,11 @@ Les logs sont écrits au format JSON avec les champs suivants :
 - `order_id` : ID de la commande (si applicable)
 - `sequence` : Numéro de séquence (si applicable)
 - `correlation_id` : ID de corrélation pour le suivi
-- `metadata` : Métadonnées contextuelles supplémentaires
+- `metadata` : Métadonnées contextuelles supplémentaires, incluant :
+  - **`raw_message`** : Le message brut JSON tel que reçu de Kafka (pour traçabilité complète)
+  - **`order_full`** : La structure Order complète sérialisée en JSON (pour analyse détaillée)
+  - **`kafka`** : Métadonnées Kafka (topic, partition, offset, key, timestamp)
+  - Informations de la commande (status, total, currency, customer, items, inventory_status, etc.)
 
 ### Analyse des Logs
 
@@ -117,6 +121,18 @@ grep 'Commande reçue' tracker.log | jq -r '.metadata.status' | sort | uniq -c
 
 # Montant total des commandes
 grep 'Commande reçue' tracker.log | jq -r '.metadata.total' | awk '{sum+=$1} END {print sum}'
+
+# Extraire le message brut d'une commande spécifique
+grep 'Commande reçue' tracker.log | jq -r 'select(.order_id == "votre-order-id") | .metadata.raw_message'
+
+# Extraire la structure complète d'une commande
+grep 'Commande reçue' tracker.log | jq 'select(.order_id == "votre-order-id") | .metadata.order_full'
+
+# Analyser les métadonnées Kafka (offset, partition, etc.)
+grep 'Commande reçue' tracker.log | jq '.metadata.kafka'
+
+# Reconstruire une commande complète depuis les logs
+grep 'Commande reçue' tracker.log | jq 'select(.order_id == "votre-order-id") | .metadata.order_full' | jq
 ```
 
 Sans `jq` :

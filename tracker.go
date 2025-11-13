@@ -104,10 +104,56 @@ func (l *Logger) Log(level LogLevel, message string, metadata map[string]interfa
 	l.file.Sync()
 }
 
-// LogOrder écrit un log spécifique pour une commande
-func (l *Logger) LogOrder(level LogLevel, message string, order Order) {
+// LogOrder écrit un log spécifique pour une commande avec le contenu complet du message
+func (l *Logger) LogOrder(level LogLevel, message string, order Order, kafkaMsg *kafka.Message) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	// Sérialiser la structure Order complète en JSON pour journalisation
+	orderJSON, err := json.Marshal(order)
+	if err != nil {
+		log.Printf("Erreur lors de la sérialisation de la commande: %v", err)
+		orderJSON = []byte("{}")
+	}
+
+	// Préparer les métadonnées Kafka
+	kafkaMetadata := make(map[string]interface{})
+	if kafkaMsg != nil {
+		if kafkaMsg.TopicPartition.Topic != nil {
+			kafkaMetadata["kafka_topic"] = *kafkaMsg.TopicPartition.Topic
+		}
+		kafkaMetadata["kafka_partition"] = kafkaMsg.TopicPartition.Partition
+		kafkaMetadata["kafka_offset"] = kafkaMsg.TopicPartition.Offset
+		if kafkaMsg.Key != nil {
+			kafkaMetadata["kafka_key"] = string(kafkaMsg.Key)
+		}
+		// Le timestamp Kafka est disponible via les headers ou peut être omis
+		if !kafkaMsg.Timestamp.IsZero() {
+			kafkaMetadata["kafka_timestamp"] = kafkaMsg.Timestamp.Format(time.RFC3339)
+		}
+	}
+
+	// Préparer les métadonnées complètes incluant le message brut et la structure complète
+	metadata := map[string]interface{}{
+		"status":           order.Status,
+		"total":            order.Total,
+		"currency":         order.Currency,
+		"customer_id":      order.CustomerInfo.CustomerID,
+		"customer_name":    order.CustomerInfo.Name,
+		"items_count":      len(order.Items),
+		"payment_method":   order.PaymentMethod,
+		"items":            order.Items,
+		"inventory_status": order.InventoryStatus,
+		// Ajout de la structure Order complète sérialisée en JSON
+		"order_full": json.RawMessage(orderJSON),
+		// Métadonnées Kafka
+		"kafka": kafkaMetadata,
+	}
+
+	// Ajout du message brut reçu de Kafka (pour traçabilité complète)
+	if kafkaMsg != nil && kafkaMsg.Value != nil {
+		metadata["raw_message"] = string(kafkaMsg.Value)
+	}
 
 	entry := LogEntry{
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
@@ -118,17 +164,7 @@ func (l *Logger) LogOrder(level LogLevel, message string, order Order) {
 		Sequence:      order.Sequence,
 		EventType:     order.Metadata.EventType,
 		CorrelationID: order.Metadata.CorrelationID,
-		Metadata: map[string]interface{}{
-			"status":           order.Status,
-			"total":            order.Total,
-			"currency":         order.Currency,
-			"customer_id":      order.CustomerInfo.CustomerID,
-			"customer_name":    order.CustomerInfo.Name,
-			"items_count":      len(order.Items),
-			"payment_method":   order.PaymentMethod,
-			"items":            order.Items,
-			"inventory_status": order.InventoryStatus,
-		},
+		Metadata:      metadata,
 	}
 
 	if err := l.encoder.Encode(entry); err != nil {
@@ -255,8 +291,8 @@ func main() {
 				continue
 			}
 
-			// Log de la réception de la commande
-			globalLogger.LogOrder(LogLevelINFO, "Commande reçue et traitée", order)
+			// Log de la réception de la commande avec le contenu complet du message
+			globalLogger.LogOrder(LogLevelINFO, "Commande reçue et traitée", order, msg)
 
 			// Affichage enrichi de la commande avec l'état complet (Event Carried State Transfer)
 			fmt.Println("\n" + strings.Repeat("=", 80))

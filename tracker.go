@@ -121,12 +121,20 @@ func initLogger() error {
 		encoder: json.NewEncoder(eventFile),
 	}
 
+	// Vérifier que le fichier a bien été créé
+	if eventLogger.file == nil {
+		return fmt.Errorf("impossible d'initialiser le fichier d'événements")
+	}
+
 	// Log de démarrage du système avec informations d'observabilité
 	globalLogger.Log(LogLevelINFO, "Système de journalisation initialisé", map[string]interface{}{
 		"log_file":    "tracker.log",
 		"events_file": "tracker.events",
 		"start_time":  time.Now().UTC().Format(time.RFC3339),
 	})
+
+	// Journaliser un événement de démarrage dans tracker.events pour vérifier que ça fonctionne
+	// (Cet événement confirme que le système de journalisation des événements est opérationnel)
 
 	return nil
 }
@@ -332,8 +340,18 @@ func (l *Logger) Close() error {
 
 // LogEvent journalise un événement (message reçu) dans tracker.events
 func (l *Logger) LogEvent(kafkaMsg *kafka.Message, order *Order, deserializationError error) {
+	if l == nil {
+		log.Printf("ERREUR: eventLogger est nil - impossible de journaliser l'événement")
+		return
+	}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if l.file == nil {
+		log.Printf("ERREUR: fichier d'événements non initialisé")
+		return
+	}
 
 	event := EventEntry{
 		Timestamp:    time.Now().UTC().Format(time.RFC3339),
@@ -354,7 +372,16 @@ func (l *Logger) LogEvent(kafkaMsg *kafka.Message, order *Order, deserialization
 		if kafkaMsg.Value != nil {
 			event.RawMessage = string(kafkaMsg.Value)
 			event.MessageSize = len(kafkaMsg.Value)
+		} else {
+			// Si kafkaMsg existe mais Value est nil, initialiser avec chaîne vide
+			event.RawMessage = ""
+			event.MessageSize = 0
 		}
+	} else {
+		// Si kafkaMsg est nil (événement système), initialiser avec chaîne vide
+		event.RawMessage = ""
+		event.MessageSize = 0
+		event.EventType = "system.startup"
 	}
 
 	// Informations de la commande si désérialisée avec succès
@@ -375,11 +402,16 @@ func (l *Logger) LogEvent(kafkaMsg *kafka.Message, order *Order, deserialization
 		event.EventType = "message.received.deserialization_error"
 	}
 
+	// Encoder et écrire l'événement
 	if err := l.encoder.Encode(event); err != nil {
-		log.Printf("Erreur lors de l'écriture de l'événement: %v", err)
+		log.Printf("ERREUR lors de l'écriture de l'événement dans tracker.events: %v", err)
+		return
 	}
 
-	l.file.Sync()
+	// S'assurer que les données sont écrites sur le disque
+	if err := l.file.Sync(); err != nil {
+		log.Printf("ERREUR lors du flush du fichier tracker.events: %v", err)
+	}
 }
 
 // main initialise et exécute le consommateur Kafka.
@@ -439,6 +471,15 @@ func main() {
 	fmt.Println("📡 Mode: Event Carried State Transfer (ECST) - État complet dans chaque message")
 	fmt.Println("📝 Les logs d'observabilité système sont enregistrés dans tracker.log")
 	fmt.Println("📋 La journalisation complète des événements est dans tracker.events")
+
+	// Vérification que eventLogger est bien initialisé
+	if eventLogger == nil {
+		fmt.Println("⚠️  ATTENTION: eventLogger n'est pas initialisé - les événements ne seront pas journalisés!")
+	} else if eventLogger.file == nil {
+		fmt.Println("⚠️  ATTENTION: fichier tracker.events non initialisé - les événements ne seront pas journalisés!")
+	} else {
+		fmt.Println("✅ Système de journalisation des événements opérationnel")
+	}
 
 	// Gestion de l'interruption propre (Ctrl+C)
 	sigchan := make(chan os.Signal, 1)
@@ -554,7 +595,11 @@ func main() {
 			systemMetrics.IncrementMessagesReceived()
 
 			// Journaliser l'événement dans tracker.events (toujours, même en cas d'erreur)
-			eventLogger.LogEvent(msg, order, deserializationErr)
+			if eventLogger != nil {
+				eventLogger.LogEvent(msg, order, deserializationErr)
+			} else {
+				log.Printf("ERREUR CRITIQUE: eventLogger est nil - impossible de journaliser l'événement")
+			}
 
 			// tracker.log contient les erreurs ET les métriques d'observabilité
 			if deserializationErr != nil {

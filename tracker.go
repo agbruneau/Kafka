@@ -64,6 +64,21 @@ type Logger struct {
 var globalLogger *Logger
 var eventLogger *Logger
 
+// SystemMetrics représente les métriques système pour l'observabilité
+type SystemMetrics struct {
+	StartTime           time.Time
+	MessagesReceived    int64
+	MessagesProcessed   int64
+	MessagesFailed      int64
+	LastMessageTime     time.Time
+	LastProcessedOffset int64
+	mu                  sync.RWMutex
+}
+
+var systemMetrics = &SystemMetrics{
+	StartTime: time.Now(),
+}
+
 // EventEntry représente une entrée d'événement (message reçu)
 type EventEntry struct {
 	Timestamp      string          `json:"timestamp"`
@@ -106,9 +121,51 @@ func initLogger() error {
 		encoder: json.NewEncoder(eventFile),
 	}
 
-	// Note: tracker.log ne contient que les erreurs
-	// Les messages normaux sont uniquement dans tracker.events
+	// Log de démarrage du système avec informations d'observabilité
+	globalLogger.Log(LogLevelINFO, "Système de journalisation initialisé", map[string]interface{}{
+		"log_file":    "tracker.log",
+		"events_file": "tracker.events",
+		"start_time":  time.Now().UTC().Format(time.RFC3339),
+	})
+
 	return nil
+}
+
+// IncrementMessagesReceived incrémente le compteur de messages reçus
+func (sm *SystemMetrics) IncrementMessagesReceived() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.MessagesReceived++
+	sm.LastMessageTime = time.Now()
+}
+
+// IncrementMessagesProcessed incrémente le compteur de messages traités avec succès
+func (sm *SystemMetrics) IncrementMessagesProcessed(offset int64) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.MessagesProcessed++
+	sm.LastProcessedOffset = offset
+}
+
+// IncrementMessagesFailed incrémente le compteur de messages en échec
+func (sm *SystemMetrics) IncrementMessagesFailed() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.MessagesFailed++
+}
+
+// GetMetrics retourne une copie des métriques actuelles
+func (sm *SystemMetrics) GetMetrics() SystemMetrics {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return SystemMetrics{
+		StartTime:           sm.StartTime,
+		MessagesReceived:    sm.MessagesReceived,
+		MessagesProcessed:   sm.MessagesProcessed,
+		MessagesFailed:      sm.MessagesFailed,
+		LastMessageTime:     sm.LastMessageTime,
+		LastProcessedOffset: sm.LastProcessedOffset,
+	}
 }
 
 // Log écrit une entrée de log structurée
@@ -368,20 +425,83 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Log d'initialisation du consommateur avec informations système
+	globalLogger.Log(LogLevelINFO, "Consommateur Kafka initialisé", map[string]interface{}{
+		"topic":             "orders",
+		"group_id":          "order-tracker",
+		"bootstrap_server":  "localhost:9092",
+		"mode":              "Event Carried State Transfer (ECST)",
+		"auto_offset_reset": "earliest",
+		"start_time":        time.Now().UTC().Format(time.RFC3339),
+	})
+
 	fmt.Println("🟢 Le consommateur est en cours d'exécution et abonné au topic 'orders'")
 	fmt.Println("📡 Mode: Event Carried State Transfer (ECST) - État complet dans chaque message")
-	fmt.Println("📝 Les erreurs sont enregistrées dans tracker.log")
+	fmt.Println("📝 Les logs d'observabilité système sont enregistrés dans tracker.log")
 	fmt.Println("📋 La journalisation complète des événements est dans tracker.events")
 
 	// Gestion de l'interruption propre (Ctrl+C)
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Ticker pour les métriques périodiques (toutes les 30 secondes)
+	metricsTicker := time.NewTicker(30 * time.Second)
+	defer metricsTicker.Stop()
+
+	// Goroutine pour logger les métriques périodiques
+	go func() {
+		for range metricsTicker.C {
+			metrics := systemMetrics.GetMetrics()
+			uptime := time.Since(metrics.StartTime)
+
+			// Calculer les taux
+			var successRate float64
+			if metrics.MessagesReceived > 0 {
+				successRate = float64(metrics.MessagesProcessed) / float64(metrics.MessagesReceived) * 100
+			}
+
+			var messagesPerSecond float64
+			if uptime.Seconds() > 0 {
+				messagesPerSecond = float64(metrics.MessagesReceived) / uptime.Seconds()
+			}
+
+			globalLogger.Log(LogLevelINFO, "Métriques système", map[string]interface{}{
+				"uptime_seconds":        int64(uptime.Seconds()),
+				"messages_received":     metrics.MessagesReceived,
+				"messages_processed":    metrics.MessagesProcessed,
+				"messages_failed":       metrics.MessagesFailed,
+				"success_rate_percent":  fmt.Sprintf("%.2f", successRate),
+				"messages_per_second":   fmt.Sprintf("%.2f", messagesPerSecond),
+				"last_message_time":     metrics.LastMessageTime.Format(time.RFC3339),
+				"last_processed_offset": metrics.LastProcessedOffset,
+			})
+		}
+	}()
+
 	// Boucle de consommation
 	run := true
 	for run {
 		select {
 		case <-sigchan:
+			// Log d'arrêt avec statistiques finales
+			metrics := systemMetrics.GetMetrics()
+			uptime := time.Since(metrics.StartTime)
+
+			var successRate float64
+			if metrics.MessagesReceived > 0 {
+				successRate = float64(metrics.MessagesProcessed) / float64(metrics.MessagesReceived) * 100
+			}
+
+			globalLogger.Log(LogLevelINFO, "Arrêt du consommateur demandé", map[string]interface{}{
+				"signal":                     "SIGINT/SIGTERM",
+				"uptime_seconds":             int64(uptime.Seconds()),
+				"total_messages_received":    metrics.MessagesReceived,
+				"total_messages_processed":   metrics.MessagesProcessed,
+				"total_messages_failed":      metrics.MessagesFailed,
+				"final_success_rate_percent": fmt.Sprintf("%.2f", successRate),
+				"shutdown_time":              time.Now().UTC().Format(time.RFC3339),
+			})
+
 			fmt.Println("\n🔴 Arrêt du consommateur")
 			run = false
 		default:
@@ -417,15 +537,26 @@ func main() {
 				order = &tempOrder
 			}
 
+			// Mettre à jour les métriques
+			systemMetrics.IncrementMessagesReceived()
+
 			// Journaliser l'événement dans tracker.events (toujours, même en cas d'erreur)
 			eventLogger.LogEvent(msg, order, deserializationErr)
 
-			// tracker.log ne contient QUE les erreurs
+			// tracker.log contient les erreurs ET les métriques d'observabilité
 			if deserializationErr != nil {
-				// Logger uniquement les erreurs dans tracker.log
+				// Mettre à jour les métriques d'échec
+				systemMetrics.IncrementMessagesFailed()
+
+				// Logger l'erreur dans tracker.log
 				globalLogger.LogRawMessage(LogLevelERROR, "Erreur lors de la désérialisation du message", msg, deserializationErr)
 				fmt.Printf("Erreur lors de la désérialisation: %v\n", deserializationErr)
 				continue
+			}
+
+			// Mettre à jour les métriques de succès
+			if msg != nil {
+				systemMetrics.IncrementMessagesProcessed(int64(msg.TopicPartition.Offset))
 			}
 
 			// Affichage enrichi de la commande avec l'état complet (Event Carried State Transfer)
@@ -480,5 +611,21 @@ func main() {
 		}
 	}
 
-	// Note: Pas de log de fermeture dans tracker.log (uniquement les erreurs)
+	// Log de fermeture propre avec statistiques finales
+	metrics := systemMetrics.GetMetrics()
+	uptime := time.Since(metrics.StartTime)
+
+	var successRate float64
+	if metrics.MessagesReceived > 0 {
+		successRate = float64(metrics.MessagesProcessed) / float64(metrics.MessagesReceived) * 100
+	}
+
+	globalLogger.Log(LogLevelINFO, "Consommateur arrêté proprement", map[string]interface{}{
+		"uptime_seconds":             int64(uptime.Seconds()),
+		"total_messages_received":    metrics.MessagesReceived,
+		"total_messages_processed":   metrics.MessagesProcessed,
+		"total_messages_failed":      metrics.MessagesFailed,
+		"final_success_rate_percent": fmt.Sprintf("%.2f", successRate),
+		"shutdown_time":              time.Now().UTC().Format(time.RFC3339),
+	})
 }

@@ -71,11 +71,12 @@ Le système de tracking (`tracker.go`) utilise deux fichiers de journalisation d
 
 ### Fichiers de Journalisation
 
-1. **`tracker.log`** : **Uniquement les erreurs**
-   - Contient uniquement les logs d'erreur (niveau ERROR)
-   - Erreurs de lecture Kafka
-   - Erreurs de désérialisation des messages
-   - Format structuré pour faciliter le débogage
+1. **`tracker.log`** : **Observabilité système complète**
+   - **Événements système** : Démarrage, initialisation, arrêt du consommateur
+   - **Métriques périodiques** : Statistiques toutes les 30 secondes (uptime, messages reçus/traités/échoués, taux de succès, débit)
+   - **Erreurs** : Erreurs de lecture Kafka, désérialisation, etc.
+   - **Statistiques finales** : Métriques complètes à l'arrêt
+   - Format structuré JSON pour faciliter le monitoring et l'analyse
 
 2. **`tracker.events`** : Journalisation complète de tous les messages reçus
    - **Chaque message reçu de Kafka est automatiquement journalisé**
@@ -88,19 +89,36 @@ Le système de tracking (`tracker.go`) utilise deux fichiers de journalisation d
 - **Tous les messages reçus sont journalisés dans `tracker.events`** : Chaque message Kafka est enregistré dès sa réception, indépendamment du succès de la désérialisation
 - **Messages valides** : Journalisés uniquement dans `tracker.events` avec le message brut ET la structure Order complète
 - **Messages invalides** : Journalisés dans `tracker.events` ET dans `tracker.log` (pour le débogage)
-- **Erreurs système** : Erreurs de lecture Kafka, désérialisation, etc. sont loggées dans `tracker.log`
+- **Observabilité système complète** : `tracker.log` contient :
+  - Événements de cycle de vie (démarrage, arrêt)
+  - Métriques périodiques (toutes les 30 secondes)
+  - Statistiques de performance (uptime, débit, taux de succès)
+  - Erreurs système (lecture Kafka, désérialisation, etc.)
 - **Aucune perte** : Aucun message n'est perdu, même en cas d'erreur de traitement
 - **Séparation des préoccupations** : 
   - `tracker.events` : Journalisation complète de tous les messages (traçabilité)
-  - `tracker.log` : Uniquement les erreurs (débogage et monitoring)
+  - `tracker.log` : Observabilité système complète (métriques, erreurs, événements système)
 
 ### Format des Fichiers
 
-#### tracker.log (Erreurs uniquement)
+#### tracker.log (Observabilité Système)
 
-Format JSON avec les champs suivants (uniquement pour les erreurs) :
+Format JSON avec les champs suivants selon le type d'événement :
+
+**Événements système (INFO)** :
 - `timestamp` : Date et heure de l'événement (RFC3339)
-- `level` : Toujours `ERROR`
+- `level` : `INFO`
+- `message` : Description de l'événement
+- `service` : Nom du service (order-tracker)
+- `metadata` : Métadonnées selon l'événement :
+  - **Démarrage** : `log_file`, `events_file`, `start_time`
+  - **Initialisation Kafka** : `topic`, `group_id`, `bootstrap_server`, `mode`, `auto_offset_reset`
+  - **Métriques périodiques** : `uptime_seconds`, `messages_received`, `messages_processed`, `messages_failed`, `success_rate_percent`, `messages_per_second`, `last_message_time`, `last_processed_offset`
+  - **Arrêt** : `signal`, `uptime_seconds`, `total_messages_received`, `total_messages_processed`, `total_messages_failed`, `final_success_rate_percent`, `shutdown_time`
+
+**Erreurs (ERROR)** :
+- `timestamp` : Date et heure de l'événement (RFC3339)
+- `level` : `ERROR`
 - `message` : Description de l'erreur
 - `service` : Nom du service (order-tracker)
 - `error` : Message d'erreur détaillé
@@ -134,14 +152,14 @@ chmod +x analyze_logs.sh
 ```
 
 Ce script affiche :
-- Statistiques générales sur `tracker.log` (nombre total d'erreurs)
+- Statistiques générales sur `tracker.log` (événements système, métriques, erreurs)
 - Nombre de commandes traitées (depuis `tracker.events`)
 - Détection d'erreurs
 - Statistiques financières (si `jq` est installé)
 - Top clients
 - Dernières entrées de log
 
-**Note** : `tracker.log` ne contient que les erreurs. Pour analyser tous les messages, utilisez `tracker.events`.
+**Note** : `tracker.log` contient l'observabilité système (métriques, erreurs, événements). Pour analyser tous les messages, utilisez `tracker.events`.
 
 ### Analyse des Événements (tracker.events)
 
@@ -212,6 +230,15 @@ grep 'Erreur lors de la désérialisation' tracker.log | jq
 
 # Analyser les événements dans tracker.events
 jq 'select(.deserialized == false)' tracker.events
+
+# Analyser les métriques système dans tracker.log
+grep '"message":"Métriques système"' tracker.log | jq
+
+# Suivre l'évolution du taux de succès
+grep '"message":"Métriques système"' tracker.log | jq -r '[.timestamp, .metadata.success_rate_percent] | @csv'
+
+# Analyser les statistiques finales à l'arrêt
+grep '"message":"Consommateur arrêté proprement"' tracker.log | jq
 ```
 
 Sans `jq` :

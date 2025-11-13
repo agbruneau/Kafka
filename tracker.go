@@ -325,23 +325,7 @@ func main() {
 				continue
 			}
 
-			var order Order
-			deserializationErr := json.Unmarshal(msg.Value, &order)
-
-			// Étape 1: Journaliser l'événement (toujours)
-			eventLogger.LogEvent(msg, &order, deserializationErr)
-
-			// Étape 2: Mettre à jour les métriques et traiter le message
-			if deserializationErr != nil {
-				systemMetrics.recordMetrics(false, true)
-				logLogger.LogError("Erreur de désérialisation du message", deserializationErr, map[string]interface{}{
-					"kafka_offset": msg.TopicPartition.Offset,
-					"raw_message":  string(msg.Value),
-				})
-			} else {
-				systemMetrics.recordMetrics(true, false)
-				displayOrder(&order)
-			}
+			processMessage(msg)
 		}
 	}
 
@@ -368,4 +352,32 @@ func displayOrder(order *Order) {
 		fmt.Printf("  - %s (x%d) @ %.2f %s\n", item.ItemName, item.Quantity, item.UnitPrice, order.Currency)
 	}
 	fmt.Println(strings.Repeat("=", 80))
+}
+
+// processMessage traite un message Kafka individuel.
+// Il désérialise, logue, et met à jour les métriques.
+func processMessage(msg *kafka.Message) {
+	var order Order
+	deserializationErr := json.Unmarshal(msg.Value, &order)
+
+	// Étape 1: Journaliser l'événement (toujours).
+	// Si la désérialisation échoue, nous passons `nil` pour `order` afin
+	// que le journal d'audit reflète correctement l'échec.
+	var orderForLog *Order
+	if deserializationErr == nil {
+		orderForLog = &order
+	}
+	eventLogger.LogEvent(msg, orderForLog, deserializationErr)
+
+	// Étape 2: Mettre à jour les métriques et traiter le message
+	if deserializationErr != nil {
+		systemMetrics.recordMetrics(false, true)
+		logLogger.LogError("Erreur de désérialisation du message", deserializationErr, map[string]interface{}{
+			"kafka_offset": msg.TopicPartition.Offset,
+			"raw_message":  string(msg.Value),
+		})
+	} else {
+		systemMetrics.recordMetrics(true, false)
+		displayOrder(&order)
+	}
 }

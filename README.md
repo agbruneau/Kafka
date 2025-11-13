@@ -56,14 +56,81 @@ Si vous préférez exécuter chaque composant séparément, suivez ces étapes :
 4.  **Lancer le consommateur** :
     Ouvrez un terminal et exécutez :
     ```bash
-    go run tracker.go
+    go run tracker.go order.go
     ```
 
 5.  **Lancer le producteur** :
     Ouvrez un second terminal et exécutez :
     ```bash
-    go run producer.go
+    go run producer.go order.go
     ```
+
+## Observabilité et Logging
+
+Le système de tracking (`tracker.go`) génère des logs structurés au format JSON dans le fichier `tracker.log`. Ces logs permettent une observabilité complète du système.
+
+### Format des Logs
+
+Les logs sont écrits au format JSON avec les champs suivants :
+- `timestamp` : Date et heure de l'événement (RFC3339)
+- `level` : Niveau de log (DEBUG, INFO, WARN, ERROR)
+- `message` : Message descriptif de l'événement
+- `service` : Nom du service (order-tracker)
+- `order_id` : ID de la commande (si applicable)
+- `sequence` : Numéro de séquence (si applicable)
+- `correlation_id` : ID de corrélation pour le suivi
+- `metadata` : Métadonnées contextuelles supplémentaires
+
+### Analyse des Logs
+
+Un script d'analyse est fourni pour exploiter les logs :
+
+```bash
+chmod +x analyze_logs.sh
+./analyze_logs.sh
+```
+
+Ce script affiche :
+- Statistiques générales (nombre total de logs, répartition par niveau)
+- Nombre de commandes traitées
+- Détection d'erreurs
+- Statistiques financières (si `jq` est installé)
+- Top clients
+- Dernières entrées de log
+
+### Exemples d'Analyse Manuelle
+
+Avec `jq` (recommandé pour l'analyse JSON) :
+
+```bash
+# Toutes les commandes d'un client spécifique
+grep 'client01' tracker.log | jq
+
+# Commandes avec un montant supérieur à 50 EUR
+grep 'Commande reçue' tracker.log | jq 'select(.metadata.total > 50)'
+
+# Erreurs avec détails
+grep '"level":"ERROR"' tracker.log | jq
+
+# Compter les commandes par statut
+grep 'Commande reçue' tracker.log | jq -r '.metadata.status' | sort | uniq -c
+
+# Montant total des commandes
+grep 'Commande reçue' tracker.log | jq -r '.metadata.total' | awk '{sum+=$1} END {print sum}'
+```
+
+Sans `jq` :
+
+```bash
+# Compter les erreurs
+grep -c '"level":"ERROR"' tracker.log
+
+# Afficher les dernières erreurs
+grep '"level":"ERROR"' tracker.log | tail -5
+
+# Compter les commandes traitées
+grep -c '"message":"Commande reçue et traitée"' tracker.log
+```
 
 ## Commandes Utiles pour Kafka
 

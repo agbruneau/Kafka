@@ -3,13 +3,14 @@ Ce programme Go (`producer.go`) agit comme un producteur de messages pour Apache
 Son rôle est de simuler la création de commandes enrichies et de les envoyer
 de manière continue à un topic Kafka.
 
-Il implémente une logique de production robuste, incluant :
-- La connexion à un broker Kafka.
-- La génération de données de commande complètes suivant le principe de l'Event Carried State Transfer.
-- La sérialisation de ces données en JSON.
-- L'envoi asynchrone des messages au topic 'orders'.
-- La gestion des rapports de livraison pour confirmer la bonne réception par Kafka.
-- Un arrêt propre (graceful shutdown) qui garantit l'envoi de tous les messages en attente.
+Il implémente une logique de production robuste qui met en œuvre plusieurs bonnes pratiques :
+- **Event Carried State Transfer** : Il génère des données de commande complètes et autonomes.
+- **Publisher/Subscriber** : Il publie des messages dans un topic Kafka.
+- **Guaranteed Delivery** : Il utilise un canal de rapport de livraison (`deliveryReport`)
+  pour s'assurer que chaque message est bien reçu par le broker Kafka.
+- **Graceful Shutdown** : Il intercepte les signaux d'arrêt du système pour terminer proprement
+  son exécution, en s'assurant que tous les messages en attente dans le tampon sont
+  envoyés avant de quitter (`producer.Flush`).
 */
 
 package main

@@ -37,13 +37,16 @@ set -x
 set -e
 set -o pipefail
 
+# Obtenir le répertoire du script
+script_dir=$(dirname "$0")
+
 # Étape 1: Démarrage des conteneurs Docker
 echo "🚀 Démarrage des conteneurs Docker (Kafka)..."
 sudo docker compose up -d
 
 # Étape 2: Attente active de la disponibilité de Kafka
 echo "⏳ Attente de la disponibilité du broker Kafka..."
-until sudo docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; do
+until sudo docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list; do
   echo "Kafka n'est pas encore prêt, nouvelle tentative dans 5 secondes..."
   sleep 5
 done
@@ -55,6 +58,7 @@ echo "📝 Création du topic Kafka 'orders' (s'il n'existe pas)..."
 sudo docker exec kafka kafka-topics \
   --bootstrap-server localhost:9092 \
   --create \
+  --if-not-exists \
   --topic orders \
   --partitions 1 \
   --replication-factor 1
@@ -68,8 +72,14 @@ go mod download
 # Les logs du tracker seront visibles dans les fichiers tracker.log et tracker.events.
 echo "🟢 Lancement du consommateur (tracker) en arrière-plan..."
 go run tracker.go order.go &
+echo $! > "$script_dir/tracker.pid"
 
 # Étape 6: Lancement du producteur (producer) au premier plan
 # Le script attendra ici jusqu'à ce que le producteur soit manuellement arrêté.
 echo "🟢 Lancement du producteur (producer) au premier plan..."
-go run producer.go order.go
+go run producer.go order.go &
+producer_pid=$!
+echo $producer_pid > "$script_dir/producer.pid"
+
+# Attendre que le producteur se termine (par exemple, via Ctrl+C)
+wait $producer_pid

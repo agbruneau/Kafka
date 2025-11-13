@@ -63,6 +63,7 @@ type Logger struct {
 
 var globalLogger *Logger
 var eventLogger *Logger
+var instanceID string // Identifiant unique de cette instance pour la scalabilité horizontale
 
 // SystemMetrics représente les métriques système pour l'observabilité
 type SystemMetrics struct {
@@ -99,8 +100,19 @@ type EventEntry struct {
 
 // initLogger initialise le système de logging
 func initLogger() error {
+	// Récupérer l'identifiant d'instance depuis la variable d'environnement
+	instanceID = os.Getenv("TRACKER_INSTANCE_ID")
+	if instanceID == "" {
+		// Générer un ID basé sur le PID si non fourni
+		instanceID = fmt.Sprintf("instance-%d", os.Getpid())
+	}
+
+	// Utiliser des fichiers de logs avec l'ID d'instance pour éviter les conflits
+	logFileName := fmt.Sprintf("tracker-%s.log", instanceID)
+	eventFileName := fmt.Sprintf("tracker-%s.events", instanceID)
+
 	// Initialiser le logger pour les logs d'observabilité
-	logFile, err := os.OpenFile("tracker.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("impossible d'ouvrir le fichier de log: %v", err)
 	}
@@ -111,7 +123,7 @@ func initLogger() error {
 	}
 
 	// Initialiser le logger pour les événements (journalisation complète)
-	eventFile, err := os.OpenFile("tracker.events", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	eventFile, err := os.OpenFile(eventFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("impossible d'ouvrir le fichier d'événements: %v", err)
 	}
@@ -128,8 +140,9 @@ func initLogger() error {
 
 	// Log de démarrage du système avec informations d'observabilité
 	globalLogger.Log(LogLevelINFO, "Système de journalisation initialisé", map[string]interface{}{
-		"log_file":    "tracker.log",
-		"events_file": "tracker.events",
+		"instance_id": instanceID,
+		"log_file":    logFileName,
+		"events_file": eventFileName,
 		"start_time":  time.Now().UTC().Format(time.RFC3339),
 	})
 
@@ -187,6 +200,13 @@ func (l *Logger) Log(level LogLevel, message string, metadata map[string]interfa
 		Message:   message,
 		Service:   "order-tracker",
 		Metadata:  metadata,
+	}
+	// Ajouter l'instance ID aux métadonnées si disponible
+	if instanceID != "" {
+		if entry.Metadata == nil {
+			entry.Metadata = make(map[string]interface{})
+		}
+		entry.Metadata["instance_id"] = instanceID
 	}
 
 	if err := l.encoder.Encode(entry); err != nil {
@@ -459,18 +479,21 @@ func main() {
 
 	// Log d'initialisation du consommateur avec informations système
 	globalLogger.Log(LogLevelINFO, "Consommateur Kafka initialisé", map[string]interface{}{
+		"instance_id":       instanceID,
 		"topic":             "orders",
 		"group_id":          "order-tracker",
 		"bootstrap_server":  "localhost:9092",
 		"mode":              "Event Carried State Transfer (ECST)",
+		"pattern":           "Competing Consumers (scalabilité horizontale)",
 		"auto_offset_reset": "earliest",
 		"start_time":        time.Now().UTC().Format(time.RFC3339),
 	})
 
-	fmt.Println("🟢 Le consommateur est en cours d'exécution et abonné au topic 'orders'")
+	fmt.Printf("🟢 Instance %s: Le consommateur est en cours d'exécution et abonné au topic 'orders'\n", instanceID)
 	fmt.Println("📡 Mode: Event Carried State Transfer (ECST) - État complet dans chaque message")
-	fmt.Println("📝 Les logs d'observabilité système sont enregistrés dans tracker.log")
-	fmt.Println("📋 La journalisation complète des événements est dans tracker.events")
+	fmt.Printf("🔄 Pattern: Competing Consumers (scalabilité horizontale) - Instance %s\n", instanceID)
+	fmt.Printf("📝 Les logs d'observabilité système sont enregistrés dans tracker-%s.log\n", instanceID)
+	fmt.Printf("📋 La journalisation complète des événements est dans tracker-%s.events\n", instanceID)
 
 	// Vérification que eventLogger est bien initialisé
 	if eventLogger == nil {
@@ -507,6 +530,7 @@ func main() {
 			}
 
 			globalLogger.Log(LogLevelINFO, "Métriques système", map[string]interface{}{
+				"instance_id":           instanceID,
 				"uptime_seconds":        int64(uptime.Seconds()),
 				"messages_received":     metrics.MessagesReceived,
 				"messages_processed":    metrics.MessagesProcessed,
@@ -533,7 +557,8 @@ func main() {
 				shutdownTime = time.Now()
 
 				globalLogger.Log(LogLevelINFO, "Signal d'arrêt reçu - traitement des messages en cours", map[string]interface{}{
-					"signal": "SIGINT/SIGTERM",
+					"instance_id": instanceID,
+					"signal":      "SIGINT/SIGTERM",
 				})
 
 				fmt.Println("\n⚠️  Signal d'arrêt reçu - traitement des messages en cours...")
@@ -688,6 +713,7 @@ func main() {
 	}
 
 	globalLogger.Log(LogLevelINFO, "Consommateur arrêté proprement", map[string]interface{}{
+		"instance_id":                instanceID,
 		"uptime_seconds":             int64(uptime.Seconds()),
 		"total_messages_received":    metrics.MessagesReceived,
 		"total_messages_processed":   metrics.MessagesProcessed,

@@ -8,8 +8,21 @@ L'architecture de ce projet est simple et se compose des éléments suivants :
 
 -   **Apache Kafka** : Le cœur du système, agissant comme un broker de messages. Il est responsable de la réception, du stockage et de la distribution des messages.
 -   **Producteur (`producer.go`)** : Un programme Go qui simule la création de commandes. Il génère des messages au format JSON et les envoie au topic Kafka `orders`.
--   **Consommateur (`tracker.go`)** : Un autre programme Go qui s'abonne au topic `orders`. Il écoute en continu les nouveaux messages, les désérialise et affiche leur contenu.
+-   **Consommateur (`tracker.go`)** : Un autre programme Go qui s'abonne au topic `orders`. Il écoute en continu les nouveaux messages, les désérialise et affiche leur contenu. **Plusieurs instances peuvent être déployées pour la scalabilité horizontale (pattern Competing Consumers)**.
 -   **Docker et Docker Compose** : L'ensemble de l'environnement, y compris Kafka et ses dépendances comme Zookeeper, est géré via Docker Compose, garantissant une configuration portable et reproductible.
+
+### Scalabilité Horizontale (Competing Consumers)
+
+Le projet implémente le pattern **Competing Consumers** pour permettre la scalabilité horizontale :
+
+-   **Plusieurs partitions** : Le topic `orders` est configuré avec 3 partitions (au lieu d'une seule) pour permettre le traitement parallèle.
+-   **Plusieurs instances** : Par défaut, 3 instances de `tracker.go` sont lancées dans le même consumer group (`order-tracker`).
+-   **Répartition automatique** : Kafka distribue automatiquement les partitions entre les instances disponibles.
+-   **Bénéfices** :
+    - **Scalabilité horizontale** : Ajoutez ou retirez des instances selon la charge
+    - **Haute disponibilité** : Si une instance tombe, les autres continuent le traitement
+    - **Traitement parallèle** : Plusieurs partitions sont traitées simultanément
+    - **Répartition équilibrée** : Kafka équilibre automatiquement la charge entre les instances
 
 ## Prérequis
 
@@ -28,7 +41,7 @@ La manière la plus simple de lancer l'application est d'utiliser les scripts fo
     ```bash
     ./start.sh
     ```
-    Ce script orchestre le démarrage des conteneurs Docker, la création du topic Kafka nécessaire, la compilation des programmes Go et leur exécution.
+    Ce script orchestre le démarrage des conteneurs Docker, la création du topic Kafka avec 3 partitions, la compilation des programmes Go et le lancement de 3 instances du consommateur (pattern Competing Consumers).
 
 -   **Pour arrêter** :
     ```bash
@@ -52,16 +65,33 @@ Si vous préférez exécuter chaque composant séparément, suivez ces étapes :
 2.  **Attendre l'initialisation de Kafka** :
     Après avoir lancé les conteneurs, attendez environ 30 secondes pour que Kafka soit pleinement opérationnel.
 
-3.  **Créer le topic Kafka** :
+3.  **Créer le topic Kafka** (avec plusieurs partitions pour la scalabilité) :
     ```bash
-    docker exec kafka kafka-topics --bootstrap-server localhost:9092 --create --topic orders --partitions 1 --replication-factor 1
+    docker exec kafka kafka-topics --bootstrap-server localhost:9092 --create --topic orders --partitions 3 --replication-factor 1
+    ```
+    
+    **Note** : Si le topic existe déjà avec 1 partition, vous pouvez augmenter le nombre de partitions :
+    ```bash
+    docker exec kafka kafka-topics --bootstrap-server localhost:9092 --alter --topic orders --partitions 3
     ```
 
-4.  **Lancer le consommateur** :
-    Ouvrez un terminal et exécutez :
+4.  **Lancer le(s) consommateur(s)** :
+    
+    **Option A : Une seule instance** (pour le développement) :
     ```bash
     go run tracker.go order.go
     ```
+    
+    **Option B : Plusieurs instances** (pour la scalabilité - pattern Competing Consumers) :
+    ```bash
+    # Lancer 3 instances dans le même consumer group
+    for i in {1..3}; do
+        TRACKER_INSTANCE_ID="instance-$i" go run tracker.go order.go &
+        sleep 1
+    done
+    ```
+    
+    Chaque instance aura ses propres fichiers de logs : `tracker-instance-1.log`, `tracker-instance-2.log`, etc.
 
 5.  **Lancer le producteur** :
     Ouvrez un second terminal et exécutez :
@@ -71,18 +101,27 @@ Si vous préférez exécuter chaque composant séparément, suivez ces étapes :
 
 ## Observabilité et Logging
 
-Le système de tracking (`tracker.go`) utilise deux fichiers de journalisation distincts pour séparer les préoccupations :
+Le système de tracking (`tracker.go`) utilise deux fichiers de journalisation distincts pour séparer les préoccupations. **Avec le pattern Competing Consumers, chaque instance a ses propres fichiers de logs** (identifiés par l'ID d'instance).
 
 ### Fichiers de Journalisation
 
-1. **`tracker.log`** : **Observabilité système complète**
+**Format des fichiers** : `tracker-<instance-id>.log` et `tracker-<instance-id>.events`
+
+Exemples :
+- `tracker-instance-1.log` et `tracker-instance-1.events` (instance 1)
+- `tracker-instance-2.log` et `tracker-instance-2.events` (instance 2)
+- `tracker-instance-3.log` et `tracker-instance-3.events` (instance 3)
+
+Si aucune variable d'environnement `TRACKER_INSTANCE_ID` n'est définie, l'instance utilisera un ID basé sur le PID : `tracker-instance-<pid>.log`
+
+1. **`tracker-<instance-id>.log`** : **Observabilité système complète**
    - **Événements système** : Démarrage, initialisation, arrêt du consommateur
    - **Métriques périodiques** : Statistiques toutes les 30 secondes (uptime, messages reçus/traités/échoués, taux de succès, débit)
    - **Erreurs** : Erreurs de lecture Kafka, désérialisation, etc.
    - **Statistiques finales** : Métriques complètes à l'arrêt
    - Format structuré JSON pour faciliter le monitoring et l'analyse
 
-2. **`tracker.events`** : Journalisation complète de tous les messages reçus
+2. **`tracker-<instance-id>.events`** : Journalisation complète de tous les messages reçus
    - **Chaque message reçu de Kafka est automatiquement journalisé**
    - Format optimisé pour la traçabilité et l'analyse
    - Inclut le message brut, les métadonnées Kafka, et la structure complète si désérialisée
@@ -163,7 +202,19 @@ Ce script affiche :
 - Top clients
 - Dernières entrées de log
 
-**Note** : `tracker.log` contient l'observabilité système (métriques, erreurs, événements). Pour analyser tous les messages, utilisez `tracker.events`.
+**Note** : `tracker-<instance-id>.log` contient l'observabilité système (métriques, erreurs, événements). Pour analyser tous les messages, utilisez `tracker-<instance-id>.events`.
+
+**Avec plusieurs instances** : Pour analyser les logs de toutes les instances, vous pouvez utiliser des patterns globaux :
+```bash
+# Analyser tous les logs de toutes les instances
+cat tracker-instance-*.log | jq
+
+# Compter les messages reçus par toutes les instances
+cat tracker-instance-*.events | jq -s 'length'
+
+# Agréger les métriques de toutes les instances
+grep '"message":"Métriques système"' tracker-instance-*.log | jq
+```
 
 ### Analyse des Événements (tracker.events)
 
@@ -271,6 +322,22 @@ Pour interagir avec Kafka et observer le système, vous pouvez utiliser ces comm
     ```bash
     docker exec kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic orders
     ```
+
+-   **Vérifier la répartition des partitions (Competing Consumers)** :
+    Cette commande est essentielle pour vérifier que le pattern Competing Consumers fonctionne correctement. Elle affiche quelle instance consomme quelle partition :
+    ```bash
+    docker exec kafka kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group order-tracker
+    ```
+    
+    Exemple de sortie :
+    ```
+    TOPIC     PARTITION  CURRENT-OFFSET  LAG  CONSUMER-ID                    HOST      CLIENT-ID
+    orders    0          150             0    consumer-order-tracker-1        /...      tracker-instance-1
+    orders    1          145             0    consumer-order-tracker-2        /...      tracker-instance-2
+    orders    2          148             0    consumer-order-tracker-3        /...      tracker-instance-3
+    ```
+    
+    Cela confirme que chaque partition est consommée par une instance différente.
 
 -   **Consommer les messages depuis le terminal** :
     Une excellente façon de déboguer ou de visualiser le flux de messages en temps réel.

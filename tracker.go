@@ -62,22 +62,54 @@ type Logger struct {
 }
 
 var globalLogger *Logger
+var eventLogger *Logger
+
+// EventEntry représente une entrée d'événement (message reçu)
+type EventEntry struct {
+	Timestamp      string          `json:"timestamp"`
+	EventType      string          `json:"event_type"`
+	KafkaTopic     string          `json:"kafka_topic,omitempty"`
+	KafkaPartition int32           `json:"kafka_partition,omitempty"`
+	KafkaOffset    int64           `json:"kafka_offset,omitempty"`
+	KafkaKey       string          `json:"kafka_key,omitempty"`
+	RawMessage     string          `json:"raw_message"`
+	MessageSize    int             `json:"message_size"`
+	OrderID        string          `json:"order_id,omitempty"`
+	Sequence       int             `json:"sequence,omitempty"`
+	Status         string          `json:"status,omitempty"`
+	Deserialized   bool            `json:"deserialized"`
+	Error          string          `json:"error,omitempty"`
+	OrderFull      json.RawMessage `json:"order_full,omitempty"`
+}
 
 // initLogger initialise le système de logging
 func initLogger() error {
-	file, err := os.OpenFile("tracker.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Initialiser le logger pour les logs d'observabilité
+	logFile, err := os.OpenFile("tracker.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("impossible d'ouvrir le fichier de log: %v", err)
 	}
 
 	globalLogger = &Logger{
-		file:    file,
-		encoder: json.NewEncoder(file),
+		file:    logFile,
+		encoder: json.NewEncoder(logFile),
+	}
+
+	// Initialiser le logger pour les événements (journalisation complète)
+	eventFile, err := os.OpenFile("tracker.events", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("impossible d'ouvrir le fichier d'événements: %v", err)
+	}
+
+	eventLogger = &Logger{
+		file:    eventFile,
+		encoder: json.NewEncoder(eventFile),
 	}
 
 	// Log de démarrage du système de logging
 	globalLogger.Log(LogLevelINFO, "Système de logging initialisé", map[string]interface{}{
-		"log_file": "tracker.log",
+		"log_file":    "tracker.log",
+		"events_file": "tracker.events",
 	})
 
 	return nil
@@ -245,6 +277,58 @@ func (l *Logger) Close() error {
 	return l.file.Close()
 }
 
+// LogEvent journalise un événement (message reçu) dans tracker.events
+func (l *Logger) LogEvent(kafkaMsg *kafka.Message, order *Order, deserializationError error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	event := EventEntry{
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		EventType:    "message.received",
+		Deserialized: order != nil,
+	}
+
+	// Métadonnées Kafka
+	if kafkaMsg != nil {
+		if kafkaMsg.TopicPartition.Topic != nil {
+			event.KafkaTopic = *kafkaMsg.TopicPartition.Topic
+		}
+		event.KafkaPartition = kafkaMsg.TopicPartition.Partition
+		event.KafkaOffset = int64(kafkaMsg.TopicPartition.Offset)
+		if kafkaMsg.Key != nil {
+			event.KafkaKey = string(kafkaMsg.Key)
+		}
+		if kafkaMsg.Value != nil {
+			event.RawMessage = string(kafkaMsg.Value)
+			event.MessageSize = len(kafkaMsg.Value)
+		}
+	}
+
+	// Informations de la commande si désérialisée avec succès
+	if order != nil {
+		event.OrderID = order.OrderID
+		event.Sequence = order.Sequence
+		event.Status = order.Status
+		// Sérialiser la structure Order complète
+		orderJSON, err := json.Marshal(order)
+		if err == nil {
+			event.OrderFull = json.RawMessage(orderJSON)
+		}
+	}
+
+	// Erreur de désérialisation si présente
+	if deserializationError != nil {
+		event.Error = deserializationError.Error()
+		event.EventType = "message.received.deserialization_error"
+	}
+
+	if err := l.encoder.Encode(event); err != nil {
+		log.Printf("Erreur lors de l'écriture de l'événement: %v", err)
+	}
+
+	l.file.Sync()
+}
+
 // main initialise et exécute le consommateur Kafka.
 // Il configure le consommateur pour se connecter au broker Kafka,
 // s'abonne au topic 'orders', et entre dans une boucle de scrutation
@@ -257,6 +341,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer globalLogger.Close()
+	defer eventLogger.Close()
 
 	// Configuration du consommateur
 	consumerConfig := kafka.ConfigMap{
@@ -296,7 +381,8 @@ func main() {
 
 	fmt.Println("🟢 Le consommateur est en cours d'exécution et abonné au topic 'orders'")
 	fmt.Println("📡 Mode: Event Carried State Transfer (ECST) - État complet dans chaque message")
-	fmt.Println("📝 Les logs sont enregistrés dans tracker.log")
+	fmt.Println("📝 Les logs d'observabilité sont enregistrés dans tracker.log")
+	fmt.Println("📋 La journalisation complète des événements est dans tracker.events")
 
 	// Gestion de l'interruption propre (Ctrl+C)
 	sigchan := make(chan os.Signal, 1)
@@ -332,22 +418,32 @@ func main() {
 				continue
 			}
 
-			// IMPORTANT: Logger TOUS les messages reçus AVANT la désérialisation
-			// pour s'assurer qu'aucun message n'est perdu, même en cas d'erreur
-			globalLogger.LogRawMessage(LogLevelINFO, "Message reçu de Kafka", msg, nil)
+			// IMPORTANT: Journaliser TOUS les messages reçus dans tracker.events
+			// pour une traçabilité complète, indépendamment du succès de la désérialisation
 
 			// Désérialisation du message
-			var order Order
-			err = json.Unmarshal(msg.Value, &order)
-			if err != nil {
+			var order *Order
+			var deserializationErr error
+			var tempOrder Order
+
+			deserializationErr = json.Unmarshal(msg.Value, &tempOrder)
+			if deserializationErr == nil {
+				order = &tempOrder
+			}
+
+			// Journaliser l'événement dans tracker.events (toujours, même en cas d'erreur)
+			eventLogger.LogEvent(msg, order, deserializationErr)
+
+			// Logs d'observabilité dans tracker.log
+			if deserializationErr != nil {
 				// Logger le message brut avec l'erreur de désérialisation
-				globalLogger.LogRawMessage(LogLevelERROR, "Erreur lors de la désérialisation du message", msg, err)
-				fmt.Printf("Erreur lors de la désérialisation: %v\n", err)
+				globalLogger.LogRawMessage(LogLevelERROR, "Erreur lors de la désérialisation du message", msg, deserializationErr)
+				fmt.Printf("Erreur lors de la désérialisation: %v\n", deserializationErr)
 				continue
 			}
 
 			// Log de la réception de la commande avec le contenu complet du message (structure enrichie)
-			globalLogger.LogOrder(LogLevelINFO, "Commande reçue et traitée", order, msg)
+			globalLogger.LogOrder(LogLevelINFO, "Commande reçue et traitée", *order, msg)
 
 			// Affichage enrichi de la commande avec l'état complet (Event Carried State Transfer)
 			fmt.Println("\n" + strings.Repeat("=", 80))

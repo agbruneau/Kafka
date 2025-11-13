@@ -67,18 +67,33 @@ Si vous préférez exécuter chaque composant séparément, suivez ces étapes :
 
 ## Observabilité et Logging
 
-Le système de tracking (`tracker.go`) génère des logs structurés au format JSON dans le fichier `tracker.log`. **Chaque message reçu de Kafka est automatiquement loggé**, garantissant une traçabilité complète et une observabilité totale du système.
+Le système de tracking (`tracker.go`) utilise deux fichiers de journalisation distincts pour séparer les préoccupations :
+
+### Fichiers de Journalisation
+
+1. **`tracker.log`** : Logs d'observabilité et de monitoring
+   - Événements système (démarrage, arrêt, erreurs)
+   - Logs structurés avec niveaux (DEBUG, INFO, WARN, ERROR)
+   - Métadonnées enrichies pour le monitoring
+
+2. **`tracker.events`** : Journalisation complète de tous les messages reçus
+   - **Chaque message reçu de Kafka est automatiquement journalisé**
+   - Format optimisé pour la traçabilité et l'analyse
+   - Inclut le message brut, les métadonnées Kafka, et la structure complète si désérialisée
 
 ### Garantie de Journalisation
 
-- **Tous les messages reçus sont loggés** : Chaque message Kafka est enregistré dans `tracker.log` dès sa réception, avant même la désérialisation
-- **Messages valides** : Loggés deux fois - une fois en format brut, une fois avec la structure enrichie
-- **Messages invalides** : Loggés avec le message brut et l'erreur de désérialisation pour faciliter le débogage
+- **Tous les messages reçus sont journalisés dans `tracker.events`** : Chaque message Kafka est enregistré dès sa réception, indépendamment du succès de la désérialisation
+- **Messages valides** : Journalisés avec le message brut ET la structure Order complète
+- **Messages invalides** : Journalisés avec le message brut et l'erreur de désérialisation
 - **Aucune perte** : Aucun message n'est perdu, même en cas d'erreur de traitement
+- **Séparation des préoccupations** : `tracker.events` pour la traçabilité, `tracker.log` pour l'observabilité
 
-### Format des Logs
+### Format des Fichiers
 
-Les logs sont écrits au format JSON avec les champs suivants :
+#### tracker.log (Logs d'Observabilité)
+
+Format JSON avec les champs suivants :
 - `timestamp` : Date et heure de l'événement (RFC3339)
 - `level` : Niveau de log (DEBUG, INFO, WARN, ERROR)
 - `message` : Message descriptif de l'événement
@@ -86,13 +101,27 @@ Les logs sont écrits au format JSON avec les champs suivants :
 - `order_id` : ID de la commande (si applicable)
 - `sequence` : Numéro de séquence (si applicable)
 - `correlation_id` : ID de corrélation pour le suivi
-- `metadata` : Métadonnées contextuelles supplémentaires, incluant :
-  - **`raw_message`** : Le message brut JSON tel que reçu de Kafka (pour traçabilité complète)
-  - **`order_full`** : La structure Order complète sérialisée en JSON (pour analyse détaillée)
-  - **`kafka`** : Métadonnées Kafka (topic, partition, offset, key, timestamp)
-  - Informations de la commande (status, total, currency, customer, items, inventory_status, etc.)
+- `metadata` : Métadonnées contextuelles supplémentaires
 
-### Analyse des Logs
+#### tracker.events (Journalisation Complète)
+
+Format JSON optimisé pour la traçabilité avec les champs suivants :
+- `timestamp` : Date et heure de réception (RFC3339)
+- `event_type` : Type d'événement (`message.received` ou `message.received.deserialization_error`)
+- `kafka_topic` : Topic Kafka source
+- `kafka_partition` : Partition Kafka
+- `kafka_offset` : Offset Kafka (pour traçabilité complète)
+- `kafka_key` : Clé du message Kafka (si présente)
+- `raw_message` : **Le message brut JSON tel que reçu de Kafka** (toujours présent)
+- `message_size` : Taille du message en octets
+- `deserialized` : Booléen indiquant si la désérialisation a réussi
+- `order_id` : ID de la commande (si désérialisée avec succès)
+- `sequence` : Numéro de séquence (si désérialisée avec succès)
+- `status` : Statut de la commande (si désérialisée avec succès)
+- `order_full` : **Structure Order complète en JSON** (si désérialisée avec succès)
+- `error` : Message d'erreur (si désérialisation échouée)
+
+### Analyse des Logs et Événements
 
 Un script d'analyse est fourni pour exploiter les logs :
 
@@ -108,6 +137,31 @@ Ce script affiche :
 - Statistiques financières (si `jq` est installé)
 - Top clients
 - Dernières entrées de log
+
+### Analyse des Événements (tracker.events)
+
+Le fichier `tracker.events` contient la journalisation complète de tous les messages reçus. Exemples d'analyse :
+
+```bash
+# Compter tous les messages reçus
+wc -l tracker.events
+
+# Compter les messages désérialisés vs non désérialisés
+grep '"deserialized":true' tracker.events | wc -l
+grep '"deserialized":false' tracker.events | wc -l
+
+# Extraire tous les messages bruts
+jq -r '.raw_message' tracker.events
+
+# Analyser les messages avec erreur de désérialisation
+jq 'select(.deserialized == false)' tracker.events
+
+# Reconstruire l'historique complet des commandes
+jq 'select(.deserialized == true) | .order_full' tracker.events
+
+# Statistiques par offset Kafka
+jq -r '.kafka_offset' tracker.events | sort -n | uniq -c
+```
 
 ### Exemples d'Analyse Manuelle
 
@@ -150,6 +204,9 @@ echo "Commandes traitées: $(grep -c 'Commande reçue et traitée' tracker.log)"
 
 # Trouver les messages qui ont échoué à la désérialisation
 grep 'Erreur lors de la désérialisation' tracker.log | jq
+
+# Analyser les événements dans tracker.events
+jq 'select(.deserialized == false)' tracker.events
 ```
 
 Sans `jq` :

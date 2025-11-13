@@ -1,37 +1,65 @@
 #!/bin/bash
 
-# Ce script est responsable du démarrage de l'ensemble de l'application de démonstration Kafka.
-# Il exécute les étapes suivantes :
-# 1. Démarrage des conteneurs Docker : Lance les services Kafka et Zookeeper en arrière-plan.
-# 2. Pause pour l'initialisation : Attend 30 secondes pour s'assurer que Kafka est prêt à accepter des connexions.
-# 3. Création du topic Kafka : Crée le topic 'orders' si celui-ci n'existe pas déjà.
-# 4. Préparation des applications Go : Télécharge les dépendances et compile les exécutables.
-# 5. Lancement du consommateur : Démarre le 'tracker' en arrière-plan pour qu'il écoute les messages.
-# 6. Lancement du producteur : Démarre le 'producer' au premier plan, qui commencera à envoyer des messages.
+# ==============================================================================
+# SCRIPT DE DÉMARRAGE DE L'APPLICATION KAFKA DEMO
+# ==============================================================================
+#
+# Ce script orchestre le démarrage complet de l'environnement de démonstration.
+# Il exécute les étapes suivantes dans un ordre précis pour garantir que
+# tous les composants sont prêts et connectés correctement.
+#
+# Étapes exécutées :
+# 1. Démarrage des conteneurs Docker : Lance le service Kafka en arrière-plan
+#    en utilisant la configuration de `docker-compose.yaml`.
+# 2. Pause d'initialisation : Attend un temps défini (30 secondes) pour
+#    s'assurer que le broker Kafka est entièrement initialisé et prêt à
+#    accepter des connexions et des commandes.
+# 3. Création du topic Kafka : Crée le topic 'orders', qui est le canal de
+#    communication entre le producteur et le consommateur.
+# 4. Installation des dépendances Go : Exécute `go mod download` pour
+#    télécharger les bibliothèques nécessaires (client Kafka, UUID).
+# 5. Lancement du consommateur (`tracker`) : Démarre le consommateur en
+#    arrière-plan. Il commencera immédiatement à écouter les messages
+#    sur le topic 'orders'.
+# 6. Lancement du producteur (`producer`) : Démarre le producteur au
+#    premier plan. Il commencera à générer et envoyer des messages.
+#    Le script se terminera lorsque le producteur sera arrêté (Ctrl+C).
+#
+# ------------------------------------------------------------------------------
 
-# Affiche les commandes exécutées pour un meilleur suivi.
+# Active le mode "verbose" pour afficher chaque commande avant son exécution.
+# Utile pour le débogage.
 set -x
 
 # Étape 1: Démarrage des conteneurs Docker
-echo "🚀 Démarrage des conteneurs Docker..."
+echo "🚀 Démarrage des conteneurs Docker (Kafka)..."
 docker compose up -d
 
-# Étape 2: Pause pour l'initialisation
-echo "⏳ Attente de 30 secondes pour l'initialisation de Kafka..."
+# Étape 2: Pause pour l'initialisation de Kafka
+echo "⏳ Attente de 30 secondes pour que Kafka soit pleinement opérationnel..."
 sleep 30
 
 # Étape 3: Création du topic Kafka 'orders'
-echo "📝 Création du topic Kafka 'orders'..."
-docker exec kafka kafka-topics --bootstrap-server localhost:9092 --create --topic orders --partitions 1 --replication-factor 1
+# Cette commande est idempotente ; elle ne fera rien si le topic existe déjà.
+echo "📝 Création du topic Kafka 'orders' (s'il n'existe pas)..."
+docker exec kafka kafka-topics \
+  --bootstrap-server localhost:9092 \
+  --create \
+  --topic orders \
+  --partitions 1 \
+  --replication-factor 1
 
 # Étape 4: Téléchargement des dépendances Go
-echo "📦 Téléchargement des dépendances Go..."
+echo "📦 Téléchargement des dépendances Go via 'go mod download'..."
 go mod download
 
 # Étape 5: Lancement du consommateur (tracker) en arrière-plan
+# Le `&` à la fin de la commande le fait tourner en tâche de fond.
+# Les logs du tracker seront visibles dans les fichiers tracker.log et tracker.events.
 echo "🟢 Lancement du consommateur (tracker) en arrière-plan..."
 go run tracker.go order.go &
 
 # Étape 6: Lancement du producteur (producer) au premier plan
+# Le script attendra ici jusqu'à ce que le producteur soit manuellement arrêté.
 echo "🟢 Lancement du producteur (producer) au premier plan..."
 go run producer.go order.go

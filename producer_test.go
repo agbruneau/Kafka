@@ -49,7 +49,7 @@ func TestDeliveryReportSuccess(t *testing.T) {
 	io.Copy(&buf, r)
 	output := buf.String()
 
-	expected := "Message livré à orders [1] @ offset 123"
+	expected := "Message livré avec succès au topic orders (partition 1) à l'offset 123"
 	if !strings.Contains(output, expected) {
 		t.Errorf("Expected output to contain '%s', but got '%s'", expected, output)
 	}
@@ -87,7 +87,7 @@ func TestDeliveryReportFailure(t *testing.T) {
 	io.Copy(&buf, r)
 	output := buf.String()
 
-	expected := "La livraison a échoué: Test error"
+	expected := "La livraison du message a échoué: Test error"
 	if !strings.Contains(output, expected) {
 		t.Errorf("Expected output to contain '%s', but got '%s'", expected, output)
 	}

@@ -106,12 +106,8 @@ func initLogger() error {
 		encoder: json.NewEncoder(eventFile),
 	}
 
-	// Log de démarrage du système de logging
-	globalLogger.Log(LogLevelINFO, "Système de logging initialisé", map[string]interface{}{
-		"log_file":    "tracker.log",
-		"events_file": "tracker.events",
-	})
-
+	// Note: tracker.log ne contient que les erreurs
+	// Les messages normaux sont uniquement dans tracker.events
 	return nil
 }
 
@@ -372,16 +368,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	globalLogger.Log(LogLevelINFO, "Consommateur initialisé et abonné au topic", map[string]interface{}{
-		"topic":            "orders",
-		"group_id":         "order-tracker",
-		"mode":             "Event Carried State Transfer (ECST)",
-		"bootstrap_server": "localhost:9092",
-	})
-
 	fmt.Println("🟢 Le consommateur est en cours d'exécution et abonné au topic 'orders'")
 	fmt.Println("📡 Mode: Event Carried State Transfer (ECST) - État complet dans chaque message")
-	fmt.Println("📝 Les logs d'observabilité sont enregistrés dans tracker.log")
+	fmt.Println("📝 Les erreurs sont enregistrées dans tracker.log")
 	fmt.Println("📋 La journalisation complète des événements est dans tracker.events")
 
 	// Gestion de l'interruption propre (Ctrl+C)
@@ -393,9 +382,6 @@ func main() {
 	for run {
 		select {
 		case <-sigchan:
-			globalLogger.Log(LogLevelINFO, "Arrêt du consommateur demandé", map[string]interface{}{
-				"signal": "SIGINT/SIGTERM",
-			})
 			fmt.Println("\n🔴 Arrêt du consommateur")
 			run = false
 		default:
@@ -434,16 +420,13 @@ func main() {
 			// Journaliser l'événement dans tracker.events (toujours, même en cas d'erreur)
 			eventLogger.LogEvent(msg, order, deserializationErr)
 
-			// Logs d'observabilité dans tracker.log
+			// tracker.log ne contient QUE les erreurs
 			if deserializationErr != nil {
-				// Logger le message brut avec l'erreur de désérialisation
+				// Logger uniquement les erreurs dans tracker.log
 				globalLogger.LogRawMessage(LogLevelERROR, "Erreur lors de la désérialisation du message", msg, deserializationErr)
 				fmt.Printf("Erreur lors de la désérialisation: %v\n", deserializationErr)
 				continue
 			}
-
-			// Log de la réception de la commande avec le contenu complet du message (structure enrichie)
-			globalLogger.LogOrder(LogLevelINFO, "Commande reçue et traitée", *order, msg)
 
 			// Affichage enrichi de la commande avec l'état complet (Event Carried State Transfer)
 			fmt.Println("\n" + strings.Repeat("=", 80))
@@ -497,8 +480,5 @@ func main() {
 		}
 	}
 
-	// Log de fermeture propre
-	globalLogger.Log(LogLevelINFO, "Consommateur arrêté proprement", map[string]interface{}{
-		"shutdown_time": time.Now().UTC().Format(time.RFC3339),
-	})
+	// Note: Pas de log de fermeture dans tracker.log (uniquement les erreurs)
 }

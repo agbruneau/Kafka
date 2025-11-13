@@ -71,37 +71,40 @@ Le système de tracking (`tracker.go`) utilise deux fichiers de journalisation d
 
 ### Fichiers de Journalisation
 
-1. **`tracker.log`** : Logs d'observabilité et de monitoring
-   - Événements système (démarrage, arrêt, erreurs)
-   - Logs structurés avec niveaux (DEBUG, INFO, WARN, ERROR)
-   - Métadonnées enrichies pour le monitoring
+1. **`tracker.log`** : **Uniquement les erreurs**
+   - Contient uniquement les logs d'erreur (niveau ERROR)
+   - Erreurs de lecture Kafka
+   - Erreurs de désérialisation des messages
+   - Format structuré pour faciliter le débogage
 
 2. **`tracker.events`** : Journalisation complète de tous les messages reçus
    - **Chaque message reçu de Kafka est automatiquement journalisé**
    - Format optimisé pour la traçabilité et l'analyse
    - Inclut le message brut, les métadonnées Kafka, et la structure complète si désérialisée
+   - Messages valides ET invalides (avec erreur de désérialisation)
 
 ### Garantie de Journalisation
 
 - **Tous les messages reçus sont journalisés dans `tracker.events`** : Chaque message Kafka est enregistré dès sa réception, indépendamment du succès de la désérialisation
-- **Messages valides** : Journalisés avec le message brut ET la structure Order complète
-- **Messages invalides** : Journalisés avec le message brut et l'erreur de désérialisation
+- **Messages valides** : Journalisés uniquement dans `tracker.events` avec le message brut ET la structure Order complète
+- **Messages invalides** : Journalisés dans `tracker.events` ET dans `tracker.log` (pour le débogage)
+- **Erreurs système** : Erreurs de lecture Kafka, désérialisation, etc. sont loggées dans `tracker.log`
 - **Aucune perte** : Aucun message n'est perdu, même en cas d'erreur de traitement
-- **Séparation des préoccupations** : `tracker.events` pour la traçabilité, `tracker.log` pour l'observabilité
+- **Séparation des préoccupations** : 
+  - `tracker.events` : Journalisation complète de tous les messages (traçabilité)
+  - `tracker.log` : Uniquement les erreurs (débogage et monitoring)
 
 ### Format des Fichiers
 
-#### tracker.log (Logs d'Observabilité)
+#### tracker.log (Erreurs uniquement)
 
-Format JSON avec les champs suivants :
+Format JSON avec les champs suivants (uniquement pour les erreurs) :
 - `timestamp` : Date et heure de l'événement (RFC3339)
-- `level` : Niveau de log (DEBUG, INFO, WARN, ERROR)
-- `message` : Message descriptif de l'événement
+- `level` : Toujours `ERROR`
+- `message` : Description de l'erreur
 - `service` : Nom du service (order-tracker)
-- `order_id` : ID de la commande (si applicable)
-- `sequence` : Numéro de séquence (si applicable)
-- `correlation_id` : ID de corrélation pour le suivi
-- `metadata` : Métadonnées contextuelles supplémentaires
+- `error` : Message d'erreur détaillé
+- `metadata` : Métadonnées contextuelles de l'erreur (topic, partition, offset, raw_message, etc.)
 
 #### tracker.events (Journalisation Complète)
 
@@ -131,12 +134,14 @@ chmod +x analyze_logs.sh
 ```
 
 Ce script affiche :
-- Statistiques générales (nombre total de logs, répartition par niveau)
-- Nombre de commandes traitées
+- Statistiques générales sur `tracker.log` (nombre total d'erreurs)
+- Nombre de commandes traitées (depuis `tracker.events`)
 - Détection d'erreurs
 - Statistiques financières (si `jq` est installé)
 - Top clients
 - Dernières entrées de log
+
+**Note** : `tracker.log` ne contient que les erreurs. Pour analyser tous les messages, utilisez `tracker.events`.
 
 ### Analyse des Événements (tracker.events)
 

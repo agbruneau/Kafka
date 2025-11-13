@@ -1,8 +1,0 @@
-+ echo '🚀 Démarrage des conteneurs Docker (Kafka)...'
-🚀 Démarrage des conteneurs Docker (Kafka)...
-+ docker compose up -d
-time="2025-11-13T18:06:31Z" level=warning msg="/app/docker-compose.yaml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
-unable to get image 'confluentinc/cp-kafka:7.8.3': permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/images/confluentinc/cp-kafka:7.8.3/json": dial unix /var/run/docker.sock: connect: permission denied
-+ echo '⏳ Attente de 30 secondes pour que Kafka soit pleinement opérationnel...'
-⏳ Attente de 30 secondes pour que Kafka soit pleinement opérationnel...
-+ sleep 30

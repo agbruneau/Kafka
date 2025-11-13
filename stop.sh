@@ -27,35 +27,47 @@
 # Active le mode "verbose" pour afficher chaque commande.
 set -x
 
+# Obtenir le répertoire du script
+script_dir=$(dirname "$0")
+
 # Étape 1: Arrêter proprement les processus Go (producer et tracker)
 echo "🔴 Arrêt des processus applicatifs Go..."
 echo "   1. Envoi du signal SIGTERM pour un arrêt gracieux..."
 
-# `pkill -f` recherche le nom du processus dans la ligne de commande complète.
-# Le signal SIGTERM (-TERM) est intercepté par nos applications Go pour
-# déclencher la logique d'arrêt propre.
-pkill -TERM -f "go run producer.go order.go"
-pkill -TERM -f "go run tracker.go order.go"
+# Vérifier si les fichiers PID existent avant de les lire
+if [ -f "$script_dir/producer.pid" ] && [ -f "$script_dir/tracker.pid" ]; then
+    producer_pid=$(cat "$script_dir/producer.pid")
+    tracker_pid=$(cat "$script_dir/tracker.pid")
 
-# Période de grâce pour permettre aux processus de s'arrêter d'eux-mêmes.
-echo "   2. Attente de 10 secondes pour le traitement des messages en cours..."
-for i in {1..10}; do
-    # `pgrep -f` vérifie si les processus existent toujours.
-    if ! pgrep -f "go run producer.go order.go" && ! pgrep -f "go run tracker.go order.go"; then
-        echo "   ✅ Les processus Go se sont arrêtés proprement."
-        break
+    # Tuer les processus en utilisant les PIDs
+    kill -TERM $producer_pid
+    kill -TERM $tracker_pid
+
+    # Période de grâce pour permettre aux processus de s'arrêter d'eux-mêmes.
+    echo "   2. Attente de 10 secondes pour le traitement des messages en cours..."
+    for i in {1..10}; do
+        if ! kill -0 $producer_pid 2>/dev/null && ! kill -0 $tracker_pid 2>/dev/null; then
+            echo "   ✅ Les processus Go se sont arrêtés proprement."
+            break
+        fi
+        sleep 1
+        echo -n "."
+    done
+    echo ""
+
+    # Si, après 10 secondes, les processus sont toujours là, on force l'arrêt.
+    if kill -0 $producer_pid 2>/dev/null || kill -0 $tracker_pid 2>/dev/null; then
+        echo "   ⚠️  Certains processus sont toujours actifs. Arrêt forcé (SIGKILL)..."
+        kill -9 $producer_pid
+        kill -9 $tracker_pid
     fi
-    sleep 1
-    # Indicateur visuel pour montrer que le script attend.
-    echo -n "."
-done
-echo "" # Saut de ligne après les points.
 
-# Si, après 10 secondes, les processus sont toujours là, on force l'arrêt.
-if pgrep -f "go run producer.go order.go" || pgrep -f "go run tracker.go order.go"; then
-    echo "   ⚠️  Certains processus sont toujours actifs. Arrêt forcé (SIGKILL)..."
-    pkill -9 -f "go run producer.go order.go"
-    pkill -9 -f "go run tracker.go order.go"
+    # Nettoyer les fichiers PID
+    rm -f "$script_dir/producer.pid" "$script_dir/tracker.pid"
+else
+    echo "   ⚠️ Fichiers PID non trouvés. Tentative d'arrêt par pkill..."
+    pkill -TERM -f "go run producer.go order.go"
+    pkill -TERM -f "go run tracker.go order.go"
 fi
 
 # Étape 2: Arrêter et supprimer les conteneurs Docker

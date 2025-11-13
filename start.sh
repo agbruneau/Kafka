@@ -33,11 +33,15 @@ set -x
 
 # Étape 1: Démarrage des conteneurs Docker
 echo "🚀 Démarrage des conteneurs Docker (Kafka)..."
-docker compose up -d
+sudo docker compose up -d
 
-# Étape 2: Pause pour l'initialisation de Kafka
-echo "⏳ Attente de 30 secondes pour que Kafka soit pleinement opérationnel..."
-sleep 30
+# Étape 2: Attente active de la disponibilité de Kafka
+echo "⏳ Attente de la disponibilité du broker Kafka..."
+until docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; do
+  echo "Kafka n'est pas encore prêt, nouvelle tentative dans 5 secondes..."
+  sleep 5
+done
+echo "✅ Kafka est prêt !"
 
 # Étape 3: Création du topic Kafka 'orders'
 # Cette commande est idempotente ; elle ne fera rien si le topic existe déjà.

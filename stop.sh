@@ -60,6 +60,6 @@ fi
 
 # Étape 2: Arrêter et supprimer les conteneurs Docker
 echo "🔴 Arrêt et suppression des conteneurs Docker..."
-docker compose down
+sudo docker compose down
 
 echo "✅ L'environnement a été complètement arrêté."

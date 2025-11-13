@@ -1,96 +1,123 @@
 #!/bin/bash
 
-# Script d'analyse des logs tracker.log
-# Ce script fournit des exemples d'analyse des logs structurés JSON
+# ==============================================================================
+# SCRIPT D'ANALYSE DES LOGS D'OBSERVABILITÉ (`tracker.log`)
+# ==============================================================================
+#
+# Ce script fournit une analyse de base du fichier de log `tracker.log`,
+# qui contient les logs système structurés au format JSON.
+#
+# Il extrait des informations clés telles que :
+# - Le nombre total d'entrées de log.
+# - La répartition des logs par niveau (INFO, ERROR).
+# - Le nombre de commandes traitées avec succès.
+# - Un résumé des erreurs détectées.
+#
+# Si l'outil `jq` (un processeur JSON en ligne de commande) est installé,
+# le script fournit également des statistiques plus avancées :
+# - Le montant total des commandes.
+# - Le montant moyen par commande.
+# - Le top 5 des clients par nombre de commandes.
+#
+# Utilisation :
+# 1. Rendez le script exécutable : `chmod +x analyze_logs.sh`
+# 2. Exécutez-le : `./analyze_logs.sh`
+#
+# ------------------------------------------------------------------------------
 
 LOG_FILE="tracker.log"
+EVENTS_FILE="tracker.events"
 
+# Vérifie si le fichier de log principal existe.
 if [ ! -f "$LOG_FILE" ]; then
-    echo "❌ Le fichier $LOG_FILE n'existe pas."
-    echo "   Assurez-vous que le tracker a été exécuté au moins une fois."
+    echo "❌ Le fichier de log '$LOG_FILE' est introuvable."
+    echo "   Veuillez lancer l'application (./start.sh) pour le générer."
     exit 1
 fi
 
-echo "📊 ANALYSE DES LOGS - tracker.log"
-echo "=================================="
+echo "📊 ANALYSE DES LOGS - $LOG_FILE"
+echo "================================================="
 echo ""
 
-# Compter le nombre total de logs
-TOTAL=$(wc -l < "$LOG_FILE")
-echo "📈 Nombre total d'entrées de log: $TOTAL"
+# --- Statistiques Générales ---
+echo "📈 STATISTIQUES GÉNÉRALES"
+echo "-------------------------------------------------"
+TOTAL_LOGS=$(wc -l < "$LOG_FILE")
+echo "   - Nombre total d'entrées de log : $TOTAL_LOGS"
+
+# Répartition par niveau de log en utilisant `grep` et `awk`.
+INFO_COUNT=$(grep -c '"level":"INFO"' "$LOG_FILE")
+ERROR_COUNT=$(grep -c '"level":"ERROR"' "$LOG_FILE")
+echo "   - Entrées de niveau INFO        : $INFO_COUNT"
+echo "   - Entrées de niveau ERROR       : $ERROR_COUNT"
 echo ""
 
-# Compter par niveau
-echo "📊 Répartition par niveau de log:"
-echo "-----------------------------------"
-grep -o '"level":"[^"]*"' "$LOG_FILE" | sort | uniq -c | sed 's/"level":"//g' | sed 's/"//g' | awk '{printf "   %-10s: %d entrées\n", $2, $1}'
+# --- Analyse des Événements (`tracker.events`) ---
+if [ -f "$EVENTS_FILE" ]; then
+    echo "📋 ANALYSE DES ÉVÉNEMENTS - $EVENTS_FILE"
+    echo "-------------------------------------------------"
+    TOTAL_EVENTS=$(wc -l < "$EVENTS_FILE")
+    PROCESSED_EVENTS=$(grep -c '"deserialized":true' "$EVENTS_FILE")
+    FAILED_EVENTS=$(grep -c '"deserialized":false' "$EVENTS_FILE")
+    echo "   - Nombre total de messages reçus : $TOTAL_EVENTS"
+    echo "   - Messages traités avec succès   : $PROCESSED_EVENTS"
+    echo "   - Échecs de désérialisation      : $FAILED_EVENTS"
+    echo ""
+fi
+
+
+# --- Analyse des Erreurs ---
+echo "🚨 ANALYSE DES ERREURS"
+echo "-------------------------------------------------"
+if [ "$ERROR_COUNT" -gt 0 ]; then
+    echo "   - ❌ $ERROR_COUNT erreur(s) détectée(s) dans '$LOG_FILE'."
+    echo "   - Dernières erreurs :"
+    # Affiche les erreurs de manière lisible, avec `jq` si possible.
+    if command -v jq &> /dev/null; then
+        grep '"level":"ERROR"' "$LOG_FILE" | tail -5 | jq -r '"     [\(.timestamp)] \(.message) | Détails: \(.error // "N/A")"'
+    else
+        grep '"level":"ERROR"' "$LOG_FILE" | tail -5
+    fi
+else
+    echo "   - ✅ Aucune erreur détectée."
+fi
 echo ""
 
-# Compter les commandes traitées
-ORDERS=$(grep -c '"message":"Commande reçue et traitée"' "$LOG_FILE" 2>/dev/null || echo "0")
-echo "📦 Commandes traitées: $ORDERS"
-echo ""
 
-# Afficher les erreurs
-ERRORS=$(grep -c '"level":"ERROR"' "$LOG_FILE" 2>/dev/null || echo "0")
-if [ "$ERRORS" -gt 0 ]; then
-    echo "❌ Erreurs détectées: $ERRORS"
-    echo "   Dernières erreurs:"
-    grep '"level":"ERROR"' "$LOG_FILE" | tail -5 | jq -r '"   [\(.timestamp)] \(.message) - \(.error // "N/A")"' 2>/dev/null || \
-    grep '"level":"ERROR"' "$LOG_FILE" | tail -5
+# --- Statistiques Métier (nécessite `jq`) ---
+if command -v jq &> /dev/null; then
+    echo "💼 STATISTIQUES MÉTIER (depuis '$EVENTS_FILE')"
+    echo "-------------------------------------------------"
+    
+    # Calcule le montant total et moyen à partir des événements valides.
+    TOTAL_AMOUNT=$(grep '"deserialized":true' "$EVENTS_FILE" | jq -r '.order_full.total' | awk '{sum+=$1} END {printf "%.2f", sum}')
+    AVG_AMOUNT=$(grep '"deserialized":true' "$EVENTS_FILE" | jq -r '.order_full.total' | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else print "0.00"}')
+    echo "   - Chiffre d'affaires total : ${TOTAL_AMOUNT:-0.00} EUR"
+    echo "   - Panier moyen             : ${AVG_AMOUNT:-0.00} EUR"
+    echo ""
+
+    # Identifie le top 5 des clients.
+    echo "   - Top 5 des clients par commandes :"
+    grep '"deserialized":true' "$EVENTS_FILE" | jq -r '.order_full.customer_info.customer_id' | sort | uniq -c | sort -rn | head -5 | awk '{printf "     - %-20s : %d commande(s)\n", $2, $1}'
     echo ""
 else
-    echo "✅ Aucune erreur détectée"
+    echo "ℹ️  Pour des statistiques métier (chiffre d'affaires, top clients), veuillez installer 'jq'."
+    echo "    Exemple: sudo apt-get install jq"
     echo ""
 fi
 
-# Statistiques sur les commandes (si jq est disponible)
-if command -v jq &> /dev/null; then
-    echo "💰 Statistiques financières:"
-    echo "----------------------------"
-    TOTAL_AMOUNT=$(grep '"message":"Commande reçue et traitée"' "$LOG_FILE" | jq -r '.metadata.total' | awk '{sum+=$1} END {printf "%.2f", sum}')
-    AVG_AMOUNT=$(grep '"message":"Commande reçue et traitée"' "$LOG_FILE" | jq -r '.metadata.total' | awk '{sum+=$1; count++} END {if(count>0) printf "%.2f", sum/count; else printf "0.00"}')
-    echo "   Total des commandes: ${TOTAL_AMOUNT} EUR"
-    echo "   Montant moyen: ${AVG_AMOUNT} EUR"
-    echo ""
-    
-    echo "👥 Top 5 clients:"
-    echo "----------------"
-    grep '"message":"Commande reçue et traitée"' "$LOG_FILE" | jq -r '.metadata.customer_id' | sort | uniq -c | sort -rn | head -5 | awk '{printf "   %-20s: %d commande(s)\n", $2, $1}'
-    echo ""
-fi
 
-# Afficher les dernières entrées
-echo "📝 Dernières 5 entrées de log:"
-echo "-------------------------------"
+# --- Dernières Activités ---
+echo "📝 DERNIÈRES ACTIVITÉS DANS '$LOG_FILE'"
+echo "-------------------------------------------------"
+# Affiche les 5 dernières lignes de log de manière formatée.
 if command -v jq &> /dev/null; then
     tail -5 "$LOG_FILE" | jq -r '"   [\(.timestamp)] [\(.level)] \(.message)"'
 else
     tail -5 "$LOG_FILE"
 fi
 echo ""
-
-echo "💡 Pour une analyse plus approfondie, utilisez:"
-echo "   - jq pour filtrer et analyser les logs JSON"
-echo "   - grep pour rechercher des patterns spécifiques"
-echo "   - awk pour des calculs personnalisés"
-echo ""
-echo "   Exemples:"
-echo "   # Toutes les commandes d'un client spécifique:"
-echo "   grep 'client01' $LOG_FILE | jq"
-echo ""
-echo "   # Commandes avec un montant supérieur à 50 EUR:"
-echo "   grep 'Commande reçue' $LOG_FILE | jq 'select(.metadata.total > 50)'"
-echo ""
-echo "   # Extraire le message brut d'une commande:"
-echo "   grep 'Commande reçue' $LOG_FILE | jq -r 'select(.order_id == \"ID\") | .metadata.raw_message'"
-echo ""
-echo "   # Extraire la structure complète d'une commande:"
-echo "   grep 'Commande reçue' $LOG_FILE | jq 'select(.order_id == \"ID\") | .metadata.order_full'"
-echo ""
-echo "   # Analyser les métadonnées Kafka (offset, partition):"
-echo "   grep 'Commande reçue' $LOG_FILE | jq '.metadata.kafka'"
-echo ""
-echo "   # Erreurs avec détails:"
-echo "   grep '\"level\":\"ERROR\"' $LOG_FILE | jq"
-
+echo "================================================="
+echo "💡 Pour une analyse manuelle, utilisez des outils comme 'jq', 'grep' et 'awk'."
+echo "   Ex: jq '. | select(.level == \"ERROR\")' tracker.log"
+echo "   Ex: jq '. | select(.deserialized == true) | .order_full' tracker.events"

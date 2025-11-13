@@ -3,18 +3,22 @@ Ce programme Go (`tracker.go`) est un consommateur de messages pour Apache Kafka
 Son rôle principal est de s'abonner au topic 'orders', de recevoir les messages,
 de les traiter et de maintenir une observabilité complète du système.
 
-Il met en œuvre plusieurs fonctionnalités clés :
-- **Consommation de messages** : Il se connecte à Kafka et écoute en continu les nouveaux messages.
+Il met en œuvre plusieurs patrons d'architecture et bonnes pratiques essentiels :
+- **Consommation de messages** : Il se connecte à Kafka et écoute en continu les nouveaux messages,
+  suivant le modèle Publisher/Subscriber.
 - **Désérialisation** : Il transforme les messages JSON entrants en structures Go (`Order`).
-- **Observabilité avancée** : Il utilise une stratégie de logging à deux fichiers :
-  1. `tracker.log`: Pour les logs système structurés (démarrage, arrêt, erreurs, métriques).
-     Ce fichier est optimisé pour le monitoring et l'alerte.
-  2. `tracker.events`: Pour la journalisation exhaustive de chaque message reçu.
-     Ce fichier garantit une traçabilité complète et sert de "log d'audit".
+- **Observabilité avancée** : Il utilise une stratégie de logging à deux fichiers qui implémente
+  deux patrons distincts :
+  1. **Application Health Monitoring** (`tracker.log`): Pour les logs système structurés
+     (démarrage, arrêt, erreurs, métriques). Ce fichier est optimisé pour le monitoring,
+     les dashboards et l'alerte.
+  2. **Audit Trail** (`tracker.events`): Pour la journalisation exhaustive de chaque
+     message reçu. Ce fichier garantit une traçabilité complète et sert de source de vérité
+     immuable pour les données entrantes.
 - **Métriques système** : Il collecte et affiche périodiquement des métriques de performance
-  (débit, taux de succès, etc.).
-- **Arrêt propre (Graceful Shutdown)** : Il gère les signaux d'arrêt (Ctrl+C) pour s'assurer
-  que les messages en cours de traitement ne sont pas perdus.
+  (débit, taux de succès, etc.) pour évaluer la santé du service.
+- **Graceful Shutdown** : Il gère les signaux d'arrêt (Ctrl+C) pour s'assurer que les messages
+  en cours de traitement ne sont pas perdus et que les ressources sont correctement libérées.
 */
 
 package main
@@ -42,7 +46,10 @@ const (
 )
 
 // LogEntry est la structure d'un log écrit dans `tracker.log`.
-// Elle est conçue pour être facilement parsable par des outils d'analyse de logs.
+// Elle est conçue pour le patron "Application Health Monitoring".
+// Chaque entrée est un log structuré (JSON) contenant des informations sur l'état
+// de l'application (démarrage, arrêt, erreurs, métriques). Ce format est optimisé
+// pour être ingéré, parsé et visualisé par des outils de monitoring et d'alerte.
 type LogEntry struct {
 	Timestamp string                 `json:"timestamp"`
 	Level     LogLevel               `json:"level"`
@@ -53,7 +60,12 @@ type LogEntry struct {
 }
 
 // EventEntry est la structure d'un événement écrit dans `tracker.events`.
-// Elle capture toutes les informations relatives à un message Kafka reçu.
+// Elle implémente le patron "Audit Trail" en capturant une copie fidèle et immuable
+// de chaque message reçu de Kafka, avec ses métadonnées.
+//
+// Chaque entrée contient le message brut, le résultat de la tentative de désérialisation,
+// et des informations contextuelles comme le topic, la partition et l'offset.
+// Ce journal est la source de vérité pour l'audit, le rejeu d'événements et le débogage.
 type EventEntry struct {
 	Timestamp      string          `json:"timestamp"`
 	EventType      string          `json:"event_type"`
@@ -154,7 +166,9 @@ func (l *Logger) LogError(message string, err error, metadata map[string]interfa
 }
 
 // LogEvent écrit un enregistrement complet de message dans `tracker.events`.
-// Cette fonction est appelée pour CHAQUE message reçu, qu'il soit valide ou non.
+// Cette fonction est le cœur de l'implémentation du patron "Audit Trail".
+// Elle est appelée pour CHAQUE message reçu, qu'il soit valide ou non, garantissant ainsi
+// qu'aucune donnée entrante n'est perdue.
 func (l *Logger) LogEvent(msg *kafka.Message, order *Order, deserializationError error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -212,6 +226,10 @@ func (sm *SystemMetrics) recordMetrics(processed, failed bool) {
 }
 
 // logPeriodicMetrics écrit un résumé des métriques dans `tracker.log` à intervalle régulier.
+// C'est un composant clé du patron "Application Health Monitoring".
+// En publiant périodiquement des indicateurs de performance (débit, taux de succès, uptime),
+// elle permet de créer des dashboards et des alertes pour surveiller la santé de l'application
+// en temps quasi-réel.
 func logPeriodicMetrics() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

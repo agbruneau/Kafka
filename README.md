@@ -1,21 +1,23 @@
 # Projet de Démonstration Kafka avec Go
 
-Ce projet est une démonstration d'un système de messagerie basé sur Apache Kafka, entièrement conteneurisé avec Docker. Il illustre un cas d'utilisation fondamental avec le patron "Event Carried State Transfer" : un producteur qui génère des commandes enrichies et un consommateur qui les traite de manière autonome.
+Ce projet est une démonstration d'un système de messagerie basé sur Apache Kafka, entièrement conteneurisé avec Docker. Il illustre plusieurs patrons d'architecture orientée événements (EDA) et bonnes pratiques de production à travers un cas d'utilisation simple : un producteur qui génère des commandes enrichies et un consommateur qui les traite de manière autonome et observable.
 
 ## Architecture
 
-L'architecture est simple et découplée. Le producteur envoie des messages contenant un état complet, permettant au consommateur de fonctionner sans dépendances externes.
+L'architecture est construite autour d'un broker Kafka qui découple le producteur et le consommateur.
 
 ```mermaid
 graph TD;
-    subgraph "Système"
-        A[Producer en Go] -->|Envoie messages JSON| B(Kafka Topic: orders);
-        B -->|Consomme messages| C[Consumer 'Tracker' en Go];
+    subgraph "Écosystème Applicatif"
+        A[Producer en Go<br>producer.go] --▶|Envoie messages enrichis| B(Kafka Topic: orders);
+        B --▶|Consomme messages| C[Consumer 'Tracker' en Go<br>tracker.go];
     end
 
-    subgraph "Observabilité"
-        C --> D[📄 tracker.log<br>Logs système, Métriques, Erreurs];
-        C --> E[📋 tracker.events<br>Journal de tous les messages reçus];
+    subgraph "Observabilité et Fiabilité"
+        C --▶ D[📄 **Health Monitoring**<br>tracker.log<br>Logs système, Métriques, Erreurs];
+        C --▶ E[📋 **Audit Trail**<br>tracker.events<br>Journal immuable des messages reçus];
+        A --▶ F[📤 **Guaranteed Delivery**<br>Gestion des accusés de réception];
+        A & C --▶ G[ graceful shutdown<br>Arrêt propre sur SIGTERM];
     end
 
     style A fill:#D5E8D4,stroke:#82B366
@@ -23,11 +25,44 @@ graph TD;
     style B fill:#DAE8FC,stroke:#6C8EBF
     style D fill:#F8CECC,stroke:#B85450
     style E fill:#F8CECC,stroke:#B85450
+    style F fill:#FFF2CC,stroke:#D6B656
+    style G fill:#E1D5E7,stroke:#9673A6
 ```
 
--   **Producteur (`producer.go`)** : Génère des commandes simulées avec un état complet (infos client, inventaire) et les envoie au topic Kafka.
--   **Apache Kafka** : Broker de messages, tournant dans un conteneur Docker. Version `confluentinc/cp-kafka:7.8.3`.
--   **Consommateur (`tracker.go`)** : S'abonne au topic, reçoit les commandes et les traite. Il maintient une double journalisation pour l'observabilité et la traçabilité.
+-   **Producteur (`producer.go`)** : Simule la création de commandes et les publie dans le topic Kafka.
+-   **Apache Kafka** : Sert de broker de messages, assurant la persistance et la livraison des événements.
+-   **Consommateur (`tracker.go`)** : S'abonne au topic, traite les commandes et implémente une stratégie d'observabilité robuste.
+
+## Patrons d'Architecture et Bonnes Pratiques
+
+Ce projet met en œuvre plusieurs patrons et pratiques essentiels pour les systèmes distribués.
+
+### 1. Event-Driven Architecture (EDA)
+Le système est entièrement piloté par les événements. Le producteur et le consommateur ne communiquent pas directement, mais via des événements (messages de commande) stockés dans Kafka. Cela favorise le découplage, la scalabilité et la résilience.
+
+### 2. Publisher/Subscriber
+Le modèle de communication est le Pub/Sub. Le producteur publie des messages dans le topic `orders` sans savoir qui les consommera. Le consommateur s'abonne à ce topic pour recevoir les messages, permettant à plusieurs consommateurs de traiter les mêmes messages en parallèle si nécessaire.
+
+### 3. Event Carried State Transfer
+C'est le patron de conception de message le plus important de ce projet. Chaque message de commande est **enrichi avec toutes les données nécessaires à son traitement** (informations client, détails de l'inventaire, etc.). Le consommateur est ainsi **autonome** et n'a pas besoin d'interroger d'autres services, ce qui réduit les dépendances et améliore la latence. Le modèle de données est défini dans `order.go`.
+
+### 4. Audit Trail (Piste d'Audit)
+Le fichier `tracker.events` implémente ce patron en créant un **journal immuable de chaque message reçu**. Qu'un message soit valide ou corrompu, il est enregistré. Cette pratique est cruciale pour :
+-   L'**audit** : Conserver une preuve de toutes les données entrantes.
+-   Le **débogage** : Analyser les messages qui ont causé des erreurs.
+-   La **relecture** : Permettre de rejouer des séquences d'événements pour des tests ou une reprise sur erreur.
+
+### 5. Application Health Monitoring
+Le fichier `tracker.log` est dédié à la surveillance de la santé de l'application. Il contient des **logs structurés (JSON)** sur les événements de cycle de vie (démarrage, arrêt), les erreurs et les **métriques périodiques** (débit de messages, taux de succès). Ce flux de données est conçu pour alimenter des dashboards, des systèmes d'alerte et des outils d'analyse de logs.
+
+### 6. Guaranteed Delivery (Livraison Garantie)
+Le producteur ne se contente pas d'envoyer les messages "à l'aveugle". Il écoute les accusés de réception (delivery reports) de Kafka pour s'assurer que chaque message a bien été reçu et stocké par le broker. La fonction `deliveryReport` dans `producer.go` est responsable de ce suivi.
+
+### 7. Graceful Shutdown (Arrêt Propre)
+Le producteur et le consommateur interceptent les signaux du système (comme `Ctrl+C`).
+-   Le **producteur** utilise `producer.Flush()` pour envoyer tous les messages qui sont encore dans son tampon.
+-   Le **consommateur** termine sa boucle de traitement et ferme proprement sa connexion.
+Cela évite la perte de données lors des arrêts planifiés ou des déploiements.
 
 ## Prérequis
 
@@ -46,10 +81,10 @@ graph TD;
 2.  **Observer les journaux :**
     Ouvrez deux autres terminaux pour suivre les journaux en temps réel :
     ```bash
-    # Suivre les logs système (métriques, erreurs)
+    # Suivre les logs système (Application Health Monitoring)
     tail -f tracker.log | jq
 
-    # Suivre tous les messages entrants
+    # Suivre tous les messages entrants (Audit Trail)
     tail -f tracker.events | jq
     ```
 
@@ -59,32 +94,27 @@ graph TD;
     ```
     Ce script arrête proprement les applications Go, puis les conteneurs Docker.
 
-## Observabilité et Journalisation
+## Stratégie d'Observabilité
 
-Le système utilise une stratégie de journalisation à deux fichiers pour séparer les préoccupations :
+Le système utilise une stratégie de journalisation à deux fichiers pour séparer les préoccupations, en s'appuyant sur les patrons décrits ci-dessus :
 
-1.  **`tracker.log` : Journal d'Observabilité Système**
-    -   **Quoi ?** Événements de cycle de vie (démarrage, arrêt), métriques périodiques, et erreurs critiques.
-    -   **Pourquoi ?** Pour le **monitoring** et l'**alerte**. Ce fichier est concis et contient les indicateurs de santé du système.
-    -   **Format** : JSON structuré.
+1.  **`tracker.log` : Journal d'Observabilité (`Application Health Monitoring`)**
+    -   **Quoi ?** Événements de cycle de vie, métriques périodiques, et erreurs critiques.
+    -   **Pourquoi ?** Pour le **monitoring** et l'**alerte**.
 
-2.  **`tracker.events` : Journal de Traçabilité des Messages**
-    -   **Quoi ?** Une copie de **chaque message** reçu de Kafka, qu'il soit valide ou non.
-    -   **Pourquoi ?** Pour l'**audit**, le **débogage** et la **relecture** d'événements. Il garantit qu'aucune donnée entrante n'est perdue.
-    -   **Format** : JSON, avec le message brut, les métadonnées Kafka et le résultat de la désérialisation.
+2.  **`tracker.events` : Journal de Traçabilité (`Audit Trail`)**
+    -   **Quoi ?** Une copie de **chaque message** reçu de Kafka.
+    -   **Pourquoi ?** Pour l'**audit**, le **débogage** et la **relecture**.
 
 ### Analyse des Journaux
 
 Un script est fourni pour une analyse rapide. Rendez-le exécutable et lancez-le :
-
 ```bash
 chmod +x analyze_logs.sh
 ./analyze_logs.sh
 ```
 
 #### Exemples d'Analyse avec `jq`
-
-`jq` est un outil puissant pour exploiter les journaux JSON.
 
 -   **Voir les erreurs système :**
     ```bash
@@ -96,11 +126,6 @@ chmod +x analyze_logs.sh
     jq 'select(.deserialized == true and .order_full.order_id == "VOTRE_ID")' tracker.events
     ```
 
--   **Compter les messages par statut de commande :**
-    ```bash
-    jq -r 'select(.deserialized == true) | .order_full.status' tracker.events | sort | uniq -c
-    ```
-
 -   **Suivre l'évolution du débit de messages (depuis `tracker.log`) :**
     ```bash
     jq -r 'select(.message == "Métriques système périodiques") | [.timestamp, .metadata.messages_per_second] | @csv' tracker.log
@@ -108,13 +133,12 @@ chmod +x analyze_logs.sh
 
 ## Structure du Code
 
--   **`order.go`** : Définit le modèle de données partagé (`Order`, `CustomerInfo`, etc.) utilisé par le producteur et le consommateur.
+-   **`order.go`** : Définit le modèle de données partagé (Event Carried State Transfer).
 -   **`producer.go`** : Le code source du producteur.
 -   **`tracker.go`** : Le code source du consommateur.
 -   **`docker-compose.yaml`** : Définit le service Kafka.
 -   **`start.sh` / `stop.sh`** : Scripts pour gérer le cycle de vie de l'application.
 -   **`analyze_logs.sh`** : Script pour l'analyse des journaux.
--   **`go.mod` / `go.sum`** : Fichiers de dépendances Go.
 
 ## Commandes Kafka Utiles
 

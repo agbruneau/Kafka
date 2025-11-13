@@ -35,12 +35,21 @@ if [ ! -f "$LOG_FILE" ]; then
     exit 1
 fi
 
-echo "📊 ANALYSE DES LOGS - $LOG_FILE"
-echo "================================================="
+# Définition des couleurs pour une sortie plus lisible
+BLUE="\e[34m"
+GREEN="\e[32m"
+RED="\e[31m"
+YELLOW="\e[33m"
+RESET="\e[0m"
+
+# Bannière
+echo -e "${BLUE}=================================================${RESET}"
+echo -e "${BLUE}📊       RAPPORT D'ANALYSE DES LOGS        📊${RESET}"
+echo -e "${BLUE}=================================================${RESET}"
 echo ""
 
 # --- Statistiques Générales ---
-echo "📈 STATISTIQUES GÉNÉRALES"
+echo -e "${GREEN}📈 STATISTIQUES GÉNÉRALES${RESET}"
 echo "-------------------------------------------------"
 TOTAL_LOGS=$(wc -l < "$LOG_FILE")
 echo "   - Nombre total d'entrées de log : $TOTAL_LOGS"
@@ -54,7 +63,7 @@ echo ""
 
 # --- Analyse des Événements (`tracker.events`) ---
 if [ -f "$EVENTS_FILE" ]; then
-    echo "📋 ANALYSE DES ÉVÉNEMENTS - $EVENTS_FILE"
+    echo -e "${GREEN}📋 ANALYSE DES ÉVÉNEMENTS - $EVENTS_FILE${RESET}"
     echo "-------------------------------------------------"
     TOTAL_EVENTS=$(wc -l < "$EVENTS_FILE")
     PROCESSED_EVENTS=$(grep -c '"deserialized":true' "$EVENTS_FILE")
@@ -66,8 +75,48 @@ if [ -f "$EVENTS_FILE" ]; then
 fi
 
 
+# --- Analyse de Performance ---
+if command -v jq &> /dev/null; then
+    echo -e "${GREEN}🚀 ANALYSE DE PERFORMANCE${RESET}"
+    echo "-------------------------------------------------"
+    # Extrait les dernières métriques périodiques depuis tracker.log
+    LAST_METRICS_LOG=$(grep '"Métriques système périodiques"' "$LOG_FILE" | tail -1)
+    if [ -n "$LAST_METRICS_LOG" ]; then
+        MSG_PER_SEC=$(echo "$LAST_METRICS_LOG" | jq -r '.metadata.messages_per_second')
+        SUCCESS_RATE=$(echo "$LAST_METRICS_LOG" | jq -r '.metadata.success_rate_percent')
+        echo "   - Dernier débit rapporté (tracker) : $MSG_PER_SEC msg/s"
+        echo "   - Dernier taux de succès (tracker)  : $SUCCESS_RATE %"
+    else
+        echo "   - Aucune métrique de performance périodique trouvée dans '$LOG_FILE'."
+    fi
+
+    # Calcule le débit moyen global basé sur les timestamps de tracker.events
+    if [ -f "$EVENTS_FILE" ] && [ "$(wc -l < "$EVENTS_FILE")" -gt 1 ]; then
+        FIRST_TS=$(head -1 "$EVENTS_FILE" | jq -r '.timestamp')
+        LAST_TS=$(tail -1 "$EVENTS_FILE" | jq -r '.timestamp')
+
+        # `date` sur Linux peut parser le format ISO 8601 directement.
+        START_SECONDS=$(date -d "$FIRST_TS" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$FIRST_TS" +%s) # macOS fallback
+        END_SECONDS=$(date -d "$LAST_TS" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$LAST_TS" +%s) # macOS fallback
+
+        DURATION=$((END_SECONDS - START_SECONDS))
+        TOTAL_EVENTS=$(wc -l < "$EVENTS_FILE")
+
+        if [ "$DURATION" -gt 0 ]; then
+            AVG_THROUGHPUT=$(awk "BEGIN {printf \"%.2f\", $TOTAL_EVENTS / $DURATION}")
+            echo "   - Débit moyen global (events)      : $AVG_THROUGHPUT msg/s sur $DURATION s"
+        else
+            echo "   - Débit moyen global (events)      : N/A (durée de traitement trop courte)"
+        fi
+    else
+        echo "   - Pas assez de données dans '$EVENTS_FILE' pour calculer le débit global."
+    fi
+    echo ""
+fi
+
+
 # --- Analyse des Erreurs ---
-echo "🚨 ANALYSE DES ERREURS"
+echo -e "${RED}🚨 ANALYSE DES ERREURS${RESET}"
 echo "-------------------------------------------------"
 if [ "$ERROR_COUNT" -gt 0 ]; then
     echo "   - ❌ $ERROR_COUNT erreur(s) détectée(s) dans '$LOG_FILE'."
@@ -78,6 +127,12 @@ if [ "$ERROR_COUNT" -gt 0 ]; then
     else
         grep '"level":"ERROR"' "$LOG_FILE" | tail -5
     fi
+
+    if [ "$FAILED_EVENTS" -gt 0 ]; then
+        echo ""
+        echo "   - 🔍 Examen des messages ayant échoué à la désérialisation :"
+        grep '"deserialized":false' "$EVENTS_FILE" | tail -5 | jq -r '"     [HORODATAGE: \(.timestamp)] [OFFSET: \(.kafka_offset)]\n       MESSAGE BRUT: \(.raw_message)\n       ERREUR: \(.error)\n"'
+    fi
 else
     echo "   - ✅ Aucune erreur détectée."
 fi
@@ -86,7 +141,7 @@ echo ""
 
 # --- Statistiques Métier (nécessite `jq`) ---
 if command -v jq &> /dev/null; then
-    echo "💼 STATISTIQUES MÉTIER (depuis '$EVENTS_FILE')"
+    echo -e "${GREEN}💼 STATISTIQUES MÉTIER (depuis '$EVENTS_FILE')${RESET}"
     echo "-------------------------------------------------"
     
     # Calcule le montant total et moyen à partir des événements valides.
@@ -100,6 +155,32 @@ if command -v jq &> /dev/null; then
     echo "   - Top 5 des clients par commandes :"
     grep '"deserialized":true' "$EVENTS_FILE" | jq -r '.order_full.customer_info.customer_id' | sort | uniq -c | sort -rn | head -5 | awk '{printf "     - %-20s : %d commande(s)\n", $2, $1}'
     echo ""
+
+    # --- Statistiques Métier Détaillées ---
+    echo "   --- Statistiques Produits ---"
+
+    # Top 5 des produits par quantité vendue
+    echo "   - Top 5 des produits par quantité vendue :"
+    grep '"deserialized":true' "$EVENTS_FILE" | jq -r '.order_full.items[] | "\(.item_name) \(.quantity)"' | \
+    awk '{arr[$1]+=$2} END {for (i in arr) print arr[i], i}' | \
+    sort -rn | head -5 | awk '{printf "     - %-20s : %d unités\n", $2, $1}'
+    echo ""
+
+    # Top 5 des produits par chiffre d'affaires
+    echo "   - Top 5 des produits par chiffre d'affaires :"
+    grep '"deserialized":true' "$EVENTS_FILE" | jq -r '.order_full.items[] | "\(.item_name) \(.total_price)"' | \
+    awk '{arr[$1]+=$2} END {for (i in arr) print arr[i], i}' | \
+    sort -rn | head -5 | awk '{printf "     - %-20s : %.2f EUR\n", $2, $1}'
+    echo ""
+
+    echo "   --- Statistiques Paiements ---"
+
+    # Répartition des méthodes de paiement
+    echo "   - Répartition des méthodes de paiement :"
+    grep '"deserialized":true' "$EVENTS_FILE" | jq -r '.order_full.payment_method' | \
+    sort | uniq -c | sort -rn | \
+    awk '{printf "     - %-20s : %d transaction(s)\n", $2, $1}'
+    echo ""
 else
     echo "ℹ️  Pour des statistiques métier (chiffre d'affaires, top clients), veuillez installer 'jq'."
     echo "    Exemple: sudo apt-get install jq"
@@ -108,7 +189,7 @@ fi
 
 
 # --- Dernières Activités ---
-echo "📝 DERNIÈRES ACTIVITÉS DANS '$LOG_FILE'"
+echo -e "${GREEN}📝 DERNIÈRES ACTIVITÉS DANS '$LOG_FILE'${RESET}"
 echo "-------------------------------------------------"
 # Affiche les 5 dernières lignes de log de manière formatée.
 if command -v jq &> /dev/null; then

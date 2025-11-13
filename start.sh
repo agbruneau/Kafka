@@ -31,13 +31,19 @@
 # Utile pour le débogage.
 set -x
 
+# Configure le script pour qu'il s'arrête immédiatement en cas d'erreur.
+# -e : quitte si une commande se termine avec un statut non nul.
+# -o pipefail : quitte si une commande dans un pipeline échoue.
+set -e
+set -o pipefail
+
 # Étape 1: Démarrage des conteneurs Docker
 echo "🚀 Démarrage des conteneurs Docker (Kafka)..."
 sudo docker compose up -d
 
 # Étape 2: Attente active de la disponibilité de Kafka
 echo "⏳ Attente de la disponibilité du broker Kafka..."
-until docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; do
+until sudo docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; do
   echo "Kafka n'est pas encore prêt, nouvelle tentative dans 5 secondes..."
   sleep 5
 done
@@ -46,7 +52,7 @@ echo "✅ Kafka est prêt !"
 # Étape 3: Création du topic Kafka 'orders'
 # Cette commande est idempotente ; elle ne fera rien si le topic existe déjà.
 echo "📝 Création du topic Kafka 'orders' (s'il n'existe pas)..."
-docker exec kafka kafka-topics \
+sudo docker exec kafka kafka-topics \
   --bootstrap-server localhost:9092 \
   --create \
   --topic orders \

@@ -30,43 +30,56 @@ set -x
 # Obtenir le répertoire du script
 script_dir=$(dirname "$0")
 
-# Étape 1: Arrêter proprement les processus Go (producer et tracker)
-echo "🔴 Arrêt des processus applicatifs Go..."
-echo "   1. Envoi du signal SIGTERM pour un arrêt gracieux..."
+# Fonction pour arrêter un processus proprement par son PID
+# Prend en paramètre le nom du service et son PID
+shutdown_process() {
+    local service_name=$1
+    local pid=$2
 
-# Vérifier si les fichiers PID existent avant de les lire
-if [ -f "$script_dir/producer.pid" ] && [ -f "$script_dir/tracker.pid" ]; then
-    producer_pid=$(cat "$script_dir/producer.pid")
-    tracker_pid=$(cat "$script_dir/tracker.pid")
+    echo "   -> Arrêt de $service_name (PID: $pid)..."
+    # Envoi du signal SIGTERM pour un arrêt gracieux
+    kill -TERM $pid
 
-    # Tuer les processus en utilisant les PIDs
-    kill -TERM $producer_pid
-    kill -TERM $tracker_pid
-
-    # Période de grâce pour permettre aux processus de s'arrêter d'eux-mêmes.
-    echo "   2. Attente de 10 secondes pour le traitement des messages en cours..."
-    for i in {1..10}; do
-        if ! kill -0 $producer_pid 2>/dev/null && ! kill -0 $tracker_pid 2>/dev/null; then
-            echo "   ✅ Les processus Go se sont arrêtés proprement."
-            break
+    # Période de grâce de 15 secondes
+    for i in {1..15}; do
+        if ! kill -0 $pid 2>/dev/null; then
+            echo "   ✅ $service_name s'est arrêté proprement."
+            return 0
         fi
         sleep 1
         echo -n "."
     done
     echo ""
 
-    # Si, après 10 secondes, les processus sont toujours là, on force l'arrêt.
-    if kill -0 $producer_pid 2>/dev/null || kill -0 $tracker_pid 2>/dev/null; then
-        echo "   ⚠️  Certains processus sont toujours actifs. Arrêt forcé (SIGKILL)..."
-        kill -9 $producer_pid
-        kill -9 $tracker_pid
-    fi
+    # Si le processus est toujours là, on force l'arrêt
+    echo "   ⚠️  $service_name ne s'est pas arrêté à temps. Arrêt forcé (SIGKILL)..."
+    kill -KILL $pid
+    return 1
+}
+
+# Étape 1: Arrêter proprement les processus Go (producer PUIS tracker)
+echo "🔴 Arrêt séquentiel des processus applicatifs Go..."
+
+if [ -f "$script_dir/producer.pid" ] && [ -f "$script_dir/tracker.pid" ]; then
+    producer_pid=$(cat "$script_dir/producer.pid")
+    tracker_pid=$(cat "$script_dir/tracker.pid")
+
+    # 1. Arrêter le producer d'abord pour stopper l'envoi de nouveaux messages
+    echo "   1. Arrêt du producer..."
+    shutdown_process "Producer" $producer_pid
+    echo ""
+
+    # 2. Ensuite, arrêter le tracker pour qu'il traite les messages restants
+    echo "   2. Arrêt du tracker..."
+    shutdown_process "Tracker" $tracker_pid
+    echo ""
 
     # Nettoyer les fichiers PID
     rm -f "$script_dir/producer.pid" "$script_dir/tracker.pid"
 else
-    echo "   ⚠️ Fichiers PID non trouvés. Tentative d'arrêt par pkill..."
+    echo "   ⚠️ Fichiers PID non trouvés. Tentative d'arrêt par pkill (moins fiable)..."
     pkill -TERM -f "go run producer.go order.go"
+    sleep 5 # Laisse un peu de temps au producer
     pkill -TERM -f "go run tracker.go order.go"
 fi
 

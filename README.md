@@ -2,37 +2,6 @@
 
 Ce projet est une démonstration d'un système de messagerie basé sur Apache Kafka, entièrement conteneurisé avec Docker. Il illustre plusieurs patrons d'architecture orientée événements (EDA) et bonnes pratiques de production à travers un cas d'utilisation simple : un producteur qui génère des commandes enrichies et un consommateur qui les traite de manière autonome et observable.
 
-## Architecture
-
-L'architecture est construite autour d'un broker Kafka qui découple le producteur et le consommateur.
-
-```mermaid
-graph TD;
-    subgraph "Écosystème Applicatif"
-        A[Producer en Go<br>producer.go] --▶|Envoie messages enrichis| B(Kafka Topic: orders);
-        B --▶|Consomme messages| C[Consumer 'Tracker' en Go<br>tracker.go];
-    end
-
-    subgraph "Observabilité et Fiabilité"
-        C --▶ D[📄 **Health Monitoring**<br>tracker.log<br>Logs système, Métriques, Erreurs];
-        C --▶ E[📋 **Audit Trail**<br>tracker.events<br>Journal immuable des messages reçus];
-        A --▶ F[📤 **Guaranteed Delivery**<br>Gestion des accusés de réception];
-        A & C --▶ G[ graceful shutdown<br>Arrêt propre sur SIGTERM];
-    end
-
-    style A fill:#D5E8D4,stroke:#82B366
-    style C fill:#D5E8D4,stroke:#82B366
-    style B fill:#DAE8FC,stroke:#6C8EBF
-    style D fill:#F8CECC,stroke:#B85450
-    style E fill:#F8CECC,stroke:#B85450
-    style F fill:#FFF2CC,stroke:#D6B656
-    style G fill:#E1D5E7,stroke:#9673A6
-```
-
--   **Producteur (`producer.go`)** : Simule la création de commandes et les publie dans le topic Kafka.
--   **Apache Kafka** : Sert de broker de messages, assurant la persistance et la livraison des événements.
--   **Consommateur (`tracker.go`)** : S'abonne au topic, traite les commandes et implémente une stratégie d'observabilité robuste.
-
 ## Patrons d'Architecture et Bonnes Pratiques
 
 Ce projet met en œuvre plusieurs patrons et pratiques essentiels pour les systèmes distribués.

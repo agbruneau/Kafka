@@ -64,23 +64,63 @@ if [ -f "$script_dir/producer.pid" ] && [ -f "$script_dir/tracker.pid" ]; then
     producer_pid=$(cat "$script_dir/producer.pid")
     tracker_pid=$(cat "$script_dir/tracker.pid")
 
+    # Vérifier que les PIDs sont valides
+    if ! kill -0 $producer_pid 2>/dev/null; then
+        echo "   ⚠️  Le producer (PID: $producer_pid) n'est plus actif."
+        producer_pid=""
+    fi
+    if ! kill -0 $tracker_pid 2>/dev/null; then
+        echo "   ⚠️  Le tracker (PID: $tracker_pid) n'est plus actif."
+        tracker_pid=""
+    fi
+
     # 1. Arrêter le producer d'abord pour stopper l'envoi de nouveaux messages
-    echo "   1. Arrêt du producer..."
-    shutdown_process "Producer" $producer_pid
-    echo ""
+    if [ -n "$producer_pid" ]; then
+        echo "   1. Arrêt du producer..."
+        shutdown_process "Producer" $producer_pid
+        echo ""
+    fi
 
     # 2. Ensuite, arrêter le tracker pour qu'il traite les messages restants
-    echo "   2. Arrêt du tracker..."
-    shutdown_process "Tracker" $tracker_pid
-    echo ""
+    if [ -n "$tracker_pid" ]; then
+        echo "   2. Arrêt du tracker..."
+        shutdown_process "Tracker" $tracker_pid
+        echo ""
+    fi
+
+    # Vérification finale que les processus sont bien arrêtés
+    echo "   🔍 Vérification finale que tous les processus sont arrêtés..."
+    sleep 1
+    if [ -n "$producer_pid" ] && kill -0 $producer_pid 2>/dev/null; then
+        echo "   ⚠️  Le producer est toujours actif, arrêt forcé..."
+        kill -KILL $producer_pid 2>/dev/null || true
+    fi
+    if [ -n "$tracker_pid" ] && kill -0 $tracker_pid 2>/dev/null; then
+        echo "   ⚠️  Le tracker est toujours actif, arrêt forcé..."
+        kill -KILL $tracker_pid 2>/dev/null || true
+    fi
 
     # Nettoyer les fichiers PID
     rm -f "$script_dir/producer.pid" "$script_dir/tracker.pid"
 else
     echo "   ⚠️ Fichiers PID non trouvés. Tentative d'arrêt par pkill (moins fiable)..."
-    pkill -TERM -f "go run producer.go order.go"
+    pkill -TERM -f "go run producer.go order.go" 2>/dev/null || true
     sleep 5 # Laisse un peu de temps au producer
-    pkill -TERM -f "go run tracker.go order.go"
+    pkill -TERM -f "go run tracker.go order.go" 2>/dev/null || true
+    sleep 2
+    # Arrêt forcé si nécessaire
+    pkill -KILL -f "go run producer.go order.go" 2>/dev/null || true
+    pkill -KILL -f "go run tracker.go order.go" 2>/dev/null || true
+fi
+
+# Vérification finale supplémentaire
+echo "   🔍 Vérification finale supplémentaire..."
+sleep 1
+if pgrep -f "go run producer.go order.go" >/dev/null 2>&1 || pgrep -f "go run tracker.go order.go" >/dev/null 2>&1; then
+    echo "   ⚠️  Certains processus Go sont encore actifs, arrêt forcé..."
+    pkill -KILL -f "go run producer.go order.go" 2>/dev/null || true
+    pkill -KILL -f "go run tracker.go order.go" 2>/dev/null || true
+    sleep 1
 fi
 
 # Étape 2: Arrêter et supprimer les conteneurs Docker

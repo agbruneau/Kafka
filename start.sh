@@ -46,11 +46,22 @@ sudo docker compose up -d
 
 # Étape 2: Attente active de la disponibilité de Kafka
 echo "⏳ Attente de la disponibilité du broker Kafka..."
-until sudo docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list; do
-  echo "Kafka n'est pas encore prêt, nouvelle tentative dans 5 secondes..."
-  sleep 5
+max_attempts=30
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+  if sudo docker exec kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+    echo "✅ Kafka est prêt !"
+    break
+  fi
+  attempt=$((attempt + 1))
+  echo "Kafka n'est pas encore prêt, tentative $attempt/$max_attempts..."
+  sleep 2
 done
-echo "✅ Kafka est prêt !"
+
+if [ $attempt -eq $max_attempts ]; then
+  echo "❌ Erreur : Kafka n'a pas pu démarrer dans le délai imparti"
+  exit 1
+fi
 
 # Étape 3: Création du topic Kafka 'orders'
 # Cette commande est idempotente ; elle ne fera rien si le topic existe déjà.

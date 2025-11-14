@@ -310,6 +310,9 @@ func main() {
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 
 	run := true
+	consecutiveErrors := 0
+	maxConsecutiveErrors := 5 // Arrêter après 5 erreurs consécutives (probablement Kafka arrêté)
+	
 	for run {
 		select {
 		case <-sigchan:
@@ -319,12 +322,42 @@ func main() {
 			msg, err := consumer.ReadMessage(1 * time.Second)
 			if err != nil {
 				if err.(kafka.Error).Code() == kafka.ErrTimedOut {
+					consecutiveErrors = 0 // Réinitialiser le compteur si c'est juste un timeout
 					continue // Pas de message, c'est normal.
 				}
+				
+				// Vérifier si c'est une erreur de connexion critique (brokers down)
+				kafkaErr, ok := err.(kafka.Error)
+				if ok {
+					errorMsg := err.Error()
+					if strings.Contains(errorMsg, "brokers are down") || 
+					   strings.Contains(errorMsg, "Connection refused") ||
+					   kafkaErr.Code() == kafka.ErrAllBrokersDown {
+						consecutiveErrors++
+						if consecutiveErrors >= maxConsecutiveErrors {
+							logLogger.LogError("Kafka semble être arrêté, arrêt du consommateur", err, map[string]interface{}{
+								"consecutive_errors": consecutiveErrors,
+							})
+							run = false
+							break
+						}
+					}
+				}
+				
 				logLogger.LogError("Erreur de lecture du message Kafka", err, nil)
+				consecutiveErrors++
+				if consecutiveErrors >= maxConsecutiveErrors {
+					logLogger.LogError("Trop d'erreurs consécutives, arrêt du consommateur", err, map[string]interface{}{
+						"consecutive_errors": consecutiveErrors,
+					})
+					run = false
+					break
+				}
 				continue
 			}
 
+			// Réinitialiser le compteur d'erreurs en cas de succès
+			consecutiveErrors = 0
 			processMessage(msg)
 		}
 	}

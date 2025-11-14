@@ -230,32 +230,36 @@ func (sm *SystemMetrics) recordMetrics(processed, failed bool) {
 // En publiant périodiquement des indicateurs de performance (débit, taux de succès, uptime),
 // elle permet de créer des dashboards et des alertes pour surveiller la santé de l'application
 // en temps quasi-réel.
-func logPeriodicMetrics() {
+func logPeriodicMetrics(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
-		<-ticker.C
-		systemMetrics.mu.RLock()
-		uptime := time.Since(systemMetrics.StartTime)
-		var successRate float64
-		if systemMetrics.MessagesReceived > 0 {
-			successRate = float64(systemMetrics.MessagesProcessed) / float64(systemMetrics.MessagesReceived) * 100
-		}
-		var messagesPerSecond float64
-		if uptime.Seconds() > 0 {
-			messagesPerSecond = float64(systemMetrics.MessagesReceived) / uptime.Seconds()
-		}
-		systemMetrics.mu.RUnlock()
+		select {
+		case <-stopChan:
+			return // Arrêt propre de la goroutine
+		case <-ticker.C:
+			systemMetrics.mu.RLock()
+			uptime := time.Since(systemMetrics.StartTime)
+			var successRate float64
+			if systemMetrics.MessagesReceived > 0 {
+				successRate = float64(systemMetrics.MessagesProcessed) / float64(systemMetrics.MessagesReceived) * 100
+			}
+			var messagesPerSecond float64
+			if uptime.Seconds() > 0 {
+				messagesPerSecond = float64(systemMetrics.MessagesReceived) / uptime.Seconds()
+			}
+			systemMetrics.mu.RUnlock()
 
-		logLogger.Log(LogLevelINFO, "Métriques système périodiques", map[string]interface{}{
-			"uptime_seconds":     uptime.Seconds(),
-			"messages_received":  systemMetrics.MessagesReceived,
-			"messages_processed": systemMetrics.MessagesProcessed,
-			"messages_failed":    systemMetrics.MessagesFailed,
-			"success_rate_percent": fmt.Sprintf("%.2f", successRate),
-			"messages_per_second":  fmt.Sprintf("%.2f", messagesPerSecond),
-		})
+			logLogger.Log(LogLevelINFO, "Métriques système périodiques", map[string]interface{}{
+				"uptime_seconds":     uptime.Seconds(),
+				"messages_received":  systemMetrics.MessagesReceived,
+				"messages_processed": systemMetrics.MessagesProcessed,
+				"messages_failed":    systemMetrics.MessagesFailed,
+				"success_rate_percent": fmt.Sprintf("%.2f", successRate),
+				"messages_per_second":  fmt.Sprintf("%.2f", messagesPerSecond),
+			})
+		}
 	}
 }
 
@@ -304,14 +308,16 @@ func main() {
 	fmt.Println("📝 Logs d'observabilité système dans tracker.log")
 	fmt.Println("📋 Journalisation complète des messages dans tracker.events")
 
-	go logPeriodicMetrics()
+	// Canal pour arrêter proprement la goroutine de métriques
+	metricsStopChan := make(chan struct{})
+	go logPeriodicMetrics(metricsStopChan)
 
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 
 	run := true
 	consecutiveErrors := 0
-	maxConsecutiveErrors := 5 // Arrêter après 5 erreurs consécutives (probablement Kafka arrêté)
+	maxConsecutiveErrors := 3 // Arrêter après 3 erreurs consécutives (probablement Kafka arrêté)
 	
 	for run {
 		select {
@@ -361,6 +367,9 @@ func main() {
 			processMessage(msg)
 		}
 	}
+
+	// Arrêter la goroutine de métriques avant de quitter
+	close(metricsStopChan)
 
 	// Log final avant de quitter
 	uptime := time.Since(systemMetrics.StartTime)

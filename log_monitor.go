@@ -52,6 +52,15 @@ type MonitorEventEntry struct {
 	OrderFull      json.RawMessage `json:"order_full,omitempty"`
 }
 
+// HealthStatus représente le statut de santé d'un indicateur
+type HealthStatus int
+
+const (
+	HealthGood HealthStatus = iota
+	HealthWarning
+	HealthCritical
+)
+
 // Metrics collecte toutes les métriques du système
 type Metrics struct {
 	mu                    sync.RWMutex
@@ -67,14 +76,17 @@ type Metrics struct {
 	Uptime                time.Duration
 	CurrentMessagesPerSec float64
 	CurrentSuccessRate    float64
+	ErrorCount            int64
+	LastErrorTime         time.Time
 }
 
 var monitorMetrics = &Metrics{
-	StartTime:         time.Now(),
+	StartTime:          time.Now(),
 	RecentLogs:         make([]MonitorLogEntry, 0, 20),
 	RecentEvents:       make([]MonitorEventEntry, 0, 20),
 	MessagesPerSecond:  make([]float64, 0, 50),
 	SuccessRateHistory: make([]float64, 0, 50),
+	LastErrorTime:      time.Time{},
 }
 
 // monitorFile surveille un fichier et traite chaque nouvelle ligne (tail-like)
@@ -170,6 +182,12 @@ func processLog(entry MonitorLogEntry) {
 		monitorMetrics.RecentLogs = monitorMetrics.RecentLogs[1:]
 	}
 
+	// Compter les erreurs
+	if entry.Level == "ERROR" {
+		monitorMetrics.ErrorCount++
+		monitorMetrics.LastErrorTime = time.Now()
+	}
+
 	// Extraire les métriques périodiques
 	if entry.Message == "Métriques système périodiques" && entry.Metadata != nil {
 		if msgsReceived, ok := entry.Metadata["messages_received"].(float64); ok {
@@ -220,6 +238,8 @@ func processEvent(entry MonitorEventEntry) {
 		monitorMetrics.MessagesProcessed++
 	} else {
 		monitorMetrics.MessagesFailed++
+		monitorMetrics.ErrorCount++
+		monitorMetrics.LastErrorTime = time.Now()
 	}
 	monitorMetrics.MessagesReceived++
 
@@ -243,6 +263,92 @@ func createMetricsTable() *widgets.Table {
 	table.SetRect(0, 0, 50, 9)
 	table.ColumnWidths = []int{30, 20}
 	return table
+}
+
+// createHealthDashboard crée un tableau de bord de santé avec indicateurs de couleur
+func createHealthDashboard() *widgets.Table {
+	table := widgets.NewTable()
+	table.Rows = [][]string{
+		{"Indicateur", "Statut"},
+		{"Santé globale", "●"},
+		{"Taux de succès", "●"},
+		{"Débit", "●"},
+		{"Erreurs", "●"},
+		{"Uptime", "-"},
+		{"Qualité", "-"},
+	}
+	table.TextStyle = ui.NewStyle(ui.ColorWhite)
+	table.RowStyles[0] = ui.NewStyle(ui.ColorYellow, ui.ColorClear, ui.ModifierBold)
+	table.SetRect(50, 0, 110, 9)
+	table.ColumnWidths = []int{25, 35}
+	return table
+}
+
+// getHealthStatus détermine le statut de santé basé sur le taux de succès
+func getHealthStatus(successRate float64) (HealthStatus, string, ui.Color) {
+	if successRate >= 95.0 {
+		return HealthGood, "● EXCELLENT", ui.ColorGreen
+	} else if successRate >= 80.0 {
+		return HealthWarning, "● BON", ui.ColorYellow
+	} else {
+		return HealthCritical, "● CRITIQUE", ui.ColorRed
+	}
+}
+
+// getThroughputStatus détermine le statut basé sur le débit
+func getThroughputStatus(mps float64) (HealthStatus, string, ui.Color) {
+	if mps >= 0.3 {
+		return HealthGood, "● NORMAL", ui.ColorGreen
+	} else if mps >= 0.1 {
+		return HealthWarning, "● FAIBLE", ui.ColorYellow
+	} else {
+		return HealthCritical, "● ARRÊTÉ", ui.ColorRed
+	}
+}
+
+// getErrorStatus détermine le statut basé sur les erreurs
+func getErrorStatus(errorCount int64, lastErrorTime time.Time) (HealthStatus, string, ui.Color) {
+	timeSinceError := time.Since(lastErrorTime)
+	if errorCount == 0 || timeSinceError > 5*time.Minute {
+		return HealthGood, "● AUCUNE", ui.ColorGreen
+	} else if timeSinceError > 1*time.Minute {
+		return HealthWarning, "● RÉCENTES", ui.ColorYellow
+	} else {
+		return HealthCritical, "● ACTIVES", ui.ColorRed
+	}
+}
+
+// calculateQualityScore calcule un score de qualité global (0-100)
+func calculateQualityScore(successRate, mps float64, errorCount int64, uptime time.Duration) float64 {
+	// Score basé sur le taux de succès (0-50 points)
+	successScore := (successRate / 100.0) * 50.0
+
+	// Score basé sur le débit (0-30 points)
+	throughputScore := 0.0
+	if mps >= 0.5 {
+		throughputScore = 30.0
+	} else if mps >= 0.3 {
+		throughputScore = 25.0
+	} else if mps >= 0.1 {
+		throughputScore = 15.0
+	} else if mps > 0 {
+		throughputScore = 10.0
+	}
+
+	// Score basé sur les erreurs (0-20 points)
+	errorScore := 20.0
+	if errorCount > 0 {
+		errorPenalty := float64(errorCount) * 2.0
+		if errorPenalty > 20.0 {
+			errorPenalty = 20.0
+		}
+		errorScore = 20.0 - errorPenalty
+		if errorScore < 0 {
+			errorScore = 0
+		}
+	}
+
+	return successScore + throughputScore + errorScore
 }
 
 // createLogList crée une liste pour afficher les logs récents
@@ -294,7 +400,7 @@ func createSuccessRateChart() *widgets.Plot {
 }
 
 // updateUI met à jour tous les widgets de l'interface
-func updateUI(table *widgets.Table, logList *widgets.List, eventList *widgets.List, mpsChart *widgets.Plot, srChart *widgets.Plot) {
+func updateUI(table *widgets.Table, healthDashboard *widgets.Table, logList *widgets.List, eventList *widgets.List, mpsChart *widgets.Plot, srChart *widgets.Plot) {
 	monitorMetrics.mu.RLock()
 	defer monitorMetrics.mu.RUnlock()
 
@@ -308,6 +414,86 @@ func updateUI(table *widgets.Table, logList *widgets.List, eventList *widgets.Li
 		{"Taux de succès", fmt.Sprintf("%.2f%%", monitorMetrics.CurrentSuccessRate)},
 		{"Dernière mise à jour", monitorMetrics.LastUpdateTime.Format("15:04:05")},
 	}
+
+	// Calculer les indicateurs de santé
+	successStatus, successText, successColor := getHealthStatus(monitorMetrics.CurrentSuccessRate)
+	throughputStatus, throughputText, throughputColor := getThroughputStatus(monitorMetrics.CurrentMessagesPerSec)
+	errorStatus, errorText, errorColor := getErrorStatus(monitorMetrics.ErrorCount, monitorMetrics.LastErrorTime)
+
+	// Déterminer la santé globale (le pire statut)
+	globalStatus := successStatus
+	globalText := "● EXCELLENT"
+	globalColor := ui.ColorGreen
+	if throughputStatus > globalStatus {
+		globalStatus = throughputStatus
+	}
+	if errorStatus > globalStatus {
+		globalStatus = errorStatus
+	}
+
+	switch globalStatus {
+	case HealthWarning:
+		globalText = "● ATTENTION"
+		globalColor = ui.ColorYellow
+	case HealthCritical:
+		globalText = "● CRITIQUE"
+		globalColor = ui.ColorRed
+	}
+
+	// Calculer le score de qualité
+	qualityScore := calculateQualityScore(
+		monitorMetrics.CurrentSuccessRate,
+		monitorMetrics.CurrentMessagesPerSec,
+		monitorMetrics.ErrorCount,
+		monitorMetrics.Uptime,
+	)
+
+	qualityText := ""
+	qualityColor := ui.ColorWhite
+	if qualityScore >= 90 {
+		qualityText = fmt.Sprintf("EXCELLENT (%.0f)", qualityScore)
+		qualityColor = ui.ColorGreen
+	} else if qualityScore >= 70 {
+		qualityText = fmt.Sprintf("BON (%.0f)", qualityScore)
+		qualityColor = ui.ColorYellow
+	} else if qualityScore >= 50 {
+		qualityText = fmt.Sprintf("MOYEN (%.0f)", qualityScore)
+		qualityColor = ui.ColorYellow
+	} else {
+		qualityText = fmt.Sprintf("FAIBLE (%.0f)", qualityScore)
+		qualityColor = ui.ColorRed
+	}
+
+	// Formater l'uptime
+	uptimeStr := ""
+	if monitorMetrics.Uptime.Hours() >= 1 {
+		uptimeStr = fmt.Sprintf("%.1fh", monitorMetrics.Uptime.Hours())
+	} else if monitorMetrics.Uptime.Minutes() >= 1 {
+		uptimeStr = fmt.Sprintf("%.0fm", monitorMetrics.Uptime.Minutes())
+	} else {
+		uptimeStr = fmt.Sprintf("%.0fs", monitorMetrics.Uptime.Seconds())
+	}
+
+	// Mettre à jour le tableau de bord de santé
+	healthDashboard.Rows = [][]string{
+		{"Indicateur", "Statut"},
+		{"Santé globale", globalText},
+		{"Taux de succès", successText},
+		{"Débit", throughputText},
+		{"Erreurs", errorText},
+		{"Uptime", uptimeStr},
+		{"Qualité", qualityText},
+	}
+
+	// Appliquer les couleurs aux lignes du dashboard
+	healthDashboard.RowStyles = make(map[int]ui.Style)
+	healthDashboard.RowStyles[0] = ui.NewStyle(ui.ColorYellow, ui.ColorClear, ui.ModifierBold)
+	healthDashboard.RowStyles[1] = ui.NewStyle(globalColor, ui.ColorClear, ui.ModifierBold)
+	healthDashboard.RowStyles[2] = ui.NewStyle(successColor, ui.ColorClear)
+	healthDashboard.RowStyles[3] = ui.NewStyle(throughputColor, ui.ColorClear)
+	healthDashboard.RowStyles[4] = ui.NewStyle(errorColor, ui.ColorClear)
+	healthDashboard.RowStyles[5] = ui.NewStyle(ui.ColorCyan, ui.ColorClear)
+	healthDashboard.RowStyles[6] = ui.NewStyle(qualityColor, ui.ColorClear, ui.ModifierBold)
 
 	// Mettre à jour la liste des logs
 	logRows := make([]string, 0, len(monitorMetrics.RecentLogs))
@@ -401,6 +587,7 @@ func main() {
 
 	// Créer les widgets
 	metricsTable := createMetricsTable()
+	healthDashboard := createHealthDashboard()
 	logList := createLogList()
 	eventList := createEventList()
 	mpsChart := createMessagesPerSecondChart()
@@ -421,6 +608,7 @@ func main() {
 				return
 			case "<Resize>":
 				metricsTable.SetRect(0, 0, 50, 9)
+				healthDashboard.SetRect(50, 0, 110, 9)
 				logList.SetRect(0, 9, 80, 19)
 				eventList.SetRect(80, 9, 160, 19)
 				mpsChart.SetRect(0, 19, 80, 29)
@@ -431,9 +619,8 @@ func main() {
 			monitorMetrics.mu.Lock()
 			monitorMetrics.Uptime = time.Since(monitorMetrics.StartTime)
 			monitorMetrics.mu.Unlock()
-			updateUI(metricsTable, logList, eventList, mpsChart, srChart)
-			ui.Render(metricsTable, logList, eventList, mpsChart, srChart)
+			updateUI(metricsTable, healthDashboard, logList, eventList, mpsChart, srChart)
+			ui.Render(metricsTable, healthDashboard, logList, eventList, mpsChart, srChart)
 		}
 	}
 }
-

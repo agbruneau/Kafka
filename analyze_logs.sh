@@ -128,7 +128,29 @@ while true; do
     echo -e "${RED}🚨 ANALYSE DES ERREURS${RESET}"
     echo "-------------------------------------------------"
     if [ "$ERROR_COUNT" -gt 0 ]; then
-        echo "   - ❌ $ERROR_COUNT erreur(s) détectée(s) dans '$LOG_FILE'."
+        # Compter les erreurs liées à l'arrêt (normales) vs les vraies erreurs
+        if command -v jq &> /dev/null; then
+            SHUTDOWN_ERRORS=$(grep '"level":"ERROR"' "$LOG_FILE" | grep -E "(brokers are down|Kafka semble être arrêté|arrêt du consommateur)" | wc -l)
+            REAL_ERRORS=$((ERROR_COUNT - SHUTDOWN_ERRORS))
+        else
+            SHUTDOWN_ERRORS=$(grep '"level":"ERROR"' "$LOG_FILE" | grep -E "brokers are down|Kafka semble être arrêté|arrêt du consommateur" | wc -l)
+            REAL_ERRORS=$((ERROR_COUNT - SHUTDOWN_ERRORS))
+        fi
+        
+        if [ "$REAL_ERRORS" -gt 0 ]; then
+            echo "   - ❌ $REAL_ERRORS erreur(s) réelle(s) détectée(s) dans '$LOG_FILE'."
+            if [ "$SHUTDOWN_ERRORS" -gt 0 ]; then
+                echo "   - ℹ️  $SHUTDOWN_ERRORS erreur(s) liée(s) à l'arrêt normal (non critique)."
+            fi
+        else
+            if [ "$SHUTDOWN_ERRORS" -gt 0 ]; then
+                echo "   - ✅ Aucune erreur réelle détectée."
+                echo "   - ℹ️  $SHUTDOWN_ERRORS erreur(s) liée(s) à l'arrêt normal (attendu)."
+            else
+                echo "   - ❌ $ERROR_COUNT erreur(s) détectée(s) dans '$LOG_FILE'."
+            fi
+        fi
+        
         echo "   - Dernières erreurs :"
         # Affiche les erreurs de manière lisible, avec `jq` si possible.
         if command -v jq &> /dev/null; then
@@ -140,7 +162,11 @@ while true; do
         if [ "$FAILED_EVENTS" -gt 0 ]; then
             echo ""
             echo "   - 🔍 Examen des messages ayant échoué à la désérialisation :"
-            grep '"deserialized":false' "$EVENTS_FILE" | tail -5 | jq -r '"     [HORODATAGE: \(.timestamp)] [OFFSET: \(.kafka_offset)]\n       MESSAGE BRUT: \(.raw_message)\n       ERREUR: \(.error)\n"'
+            if command -v jq &> /dev/null; then
+                grep '"deserialized":false' "$EVENTS_FILE" | tail -5 | jq -r '"     [HORODATAGE: \(.timestamp)] [OFFSET: \(.kafka_offset)]\n       MESSAGE BRUT: \(.raw_message)\n       ERREUR: \(.error)\n"'
+            else
+                grep '"deserialized":false' "$EVENTS_FILE" | tail -5
+            fi
         fi
     else
         echo "   - ✅ Aucune erreur détectée."

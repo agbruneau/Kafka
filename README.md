@@ -4,11 +4,10 @@ Ce projet est une démonstration d'un système de messagerie basé sur Apache Ka
 
 ## Schéma de l'Architecture
 
-```mermaid
-graph TD
+flowchart TD
     subgraph "Machine Hôte"
         A[start.sh] --> B{Docker}
-        B --> C[Kafka Broker<br>(Topic: orders)]
+        B --> C[Kafka Broker - Topic: orders]
         A --> D[producer.go]
         A --> E[tracker.go]
         F[stop.sh] -- "Arrête" --> D & E & B
@@ -21,14 +20,13 @@ graph TD
     end
 
     subgraph "Observabilité"
-        E -- "Écrit" --> H(tracker.log<br>Logs structurés)
-        E -- "Écrit" --> I(tracker.events<br>Audit Trail)
+        E -- "Écrit" --> H(tracker.log Logs structurés)
+        E -- "Écrit" --> I(tracker.events Audit Trail)
     end
 
     style A fill:#c9f,stroke:#333,stroke-width:2px
     style F fill:#f99,stroke:#333,stroke-width:2px
     style G fill:#9cf,stroke:#333,stroke-width:2px
-```
 
 ## Patrons d'Architecture et Bonnes Pratiques
 

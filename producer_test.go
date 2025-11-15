@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestDeliveryReportSuccess tests the deliveryReport function for a successful delivery.
@@ -53,6 +54,55 @@ func TestDeliveryReportSuccess(t *testing.T) {
 	if !strings.Contains(output, expected) {
 		t.Errorf("Expected output to contain '%s', but got '%s'", expected, output)
 	}
+}
+
+// TestCreateOrderCorrectness verifies that the createOrder function generates a well-formed
+// and fully enriched Order object.
+//
+// This test is crucial for ensuring the quality and consistency of the data being
+// produced. By validating the output of the core data generation logic, we can
+// prevent issues downstream in the consumer or in any other system that relies
+// on this data. It confirms that financial calculations are correct and that all
+// necessary metadata and contextual information are included.
+func TestCreateOrderCorrectness(t *testing.T) {
+	// --- Arrange ---
+	// Define a template and sequence number for the test case.
+	template := OrderTemplate{
+		User:     "test-user",
+		Item:     "cappuccino",
+		Quantity: 2,
+		Price:    3.50,
+	}
+	sequence := 42
+
+	// --- Act ---
+	// Call the function under test to generate an order.
+	order := createOrder(sequence, template)
+
+	// --- Assert ---
+	// Use a small tolerance for floating-point comparisons to avoid precision issues.
+	tolerance := 0.001
+
+	// 1. Basic Information
+	assert.Equal(t, sequence, order.Sequence, "Sequence number should match")
+	assert.Equal(t, template.User, order.CustomerInfo.CustomerID, "CustomerID should match the template user")
+
+	// 2. Financial Calculations
+	expectedSubTotal := 7.00 // 2 * 3.50
+	assert.InDelta(t, expectedSubTotal, order.SubTotal, tolerance, "SubTotal should be calculated correctly")
+
+	expectedTax := 1.40 // 7.00 * 0.20
+	assert.InDelta(t, expectedTax, order.Tax, tolerance, "Tax should be calculated correctly")
+
+	expectedTotal := 10.90 // 7.00 + 1.40 + 2.50 (shipping)
+	assert.InDelta(t, expectedTotal, order.Total, tolerance, "Total should be calculated correctly")
+
+	// 3. Enriched Data (ECST verification)
+	assert.Len(t, order.Items, 1, "Order should contain exactly one item")
+	assert.Equal(t, template.Item, order.Items[0].ItemName, "Item name should match the template")
+	assert.Equal(t, "test-user@example.com", order.CustomerInfo.Email, "Customer email should be formatted correctly")
+	assert.Len(t, order.InventoryStatus, 1, "Order should contain exactly one inventory status")
+	assert.True(t, order.InventoryStatus[0].InStock, "Inventory status should indicate the item is in stock")
 }
 
 // TestDeliveryReportFailure tests the deliveryReport function for a failed delivery.

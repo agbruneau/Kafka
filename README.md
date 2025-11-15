@@ -83,6 +83,22 @@ chmod +x analyze_logs.sh
 ./analyze_logs.sh
 ```
 
+### Moniteur de Logs Interactif (Nouveau)
+
+Un moniteur de logs interactif en temps réel est disponible pour une observabilité avancée.
+
+**Prérequis pour le moniteur :**
+Assurez-vous que les dépendances Go sont installées :
+```bash
+go mod tidy
+```
+
+**Lancement du moniteur :**
+Pour lancer le moniteur, exécutez la commande suivante dans un nouveau terminal :
+```bash
+go run log_monitor.go
+```
+
 #### Exemples d'Analyse avec `jq`
 
 -   **Voir les erreurs système :**

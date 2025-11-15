@@ -334,30 +334,39 @@ func main() {
 				
 				// Vérifier si c'est une erreur de connexion critique (brokers down)
 				kafkaErr, ok := err.(kafka.Error)
+				isShutdownError := false
 				if ok {
 					errorMsg := err.Error()
 					if strings.Contains(errorMsg, "brokers are down") || 
 					   strings.Contains(errorMsg, "Connection refused") ||
 					   kafkaErr.Code() == kafka.ErrAllBrokersDown {
+						isShutdownError = true
 						consecutiveErrors++
 						if consecutiveErrors >= maxConsecutiveErrors {
-							logLogger.LogError("Kafka semble être arrêté, arrêt du consommateur", err, map[string]interface{}{
+							// Logger comme INFO au lieu d'ERROR car c'est un arrêt normal
+							logLogger.Log(LogLevelINFO, "Kafka semble être arrêté, arrêt du consommateur", map[string]interface{}{
 								"consecutive_errors": consecutiveErrors,
+								"reason": "brokers_unavailable",
 							})
 							run = false
 							break
 						}
+						// Ne pas logger les erreurs intermédiaires de shutdown pour éviter le bruit
+						continue
 					}
 				}
 				
-				logLogger.LogError("Erreur de lecture du message Kafka", err, nil)
-				consecutiveErrors++
-				if consecutiveErrors >= maxConsecutiveErrors {
-					logLogger.LogError("Trop d'erreurs consécutives, arrêt du consommateur", err, map[string]interface{}{
-						"consecutive_errors": consecutiveErrors,
-					})
-					run = false
-					break
+				// Logger seulement les erreurs qui ne sont pas liées à l'arrêt
+				if !isShutdownError {
+					logLogger.LogError("Erreur de lecture du message Kafka", err, nil)
+					consecutiveErrors++
+					if consecutiveErrors >= maxConsecutiveErrors {
+						logLogger.LogError("Trop d'erreurs consécutives, arrêt du consommateur", err, map[string]interface{}{
+							"consecutive_errors": consecutiveErrors,
+						})
+						run = false
+						break
+					}
 				}
 				continue
 			}

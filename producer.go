@@ -1,18 +1,3 @@
-/*
-Ce programme Go (`producer.go`) agit comme un producteur de messages pour Apache Kafka.
-Son rôle est de simuler la création de commandes enrichies et de les envoyer
-de manière continue à un topic Kafka.
-
-Il implémente une logique de production robuste qui met en œuvre plusieurs bonnes pratiques :
-- **Event Carried State Transfer** : Il génère des données de commande complètes et autonomes.
-- **Publisher/Subscriber** : Il publie des messages dans un topic Kafka.
-- **Guaranteed Delivery** : Il utilise un canal de rapport de livraison (`deliveryReport`)
-  pour s'assurer que chaque message est bien reçu par le broker Kafka.
-- **Graceful Shutdown** : Il intercepte les signaux d'arrêt du système pour terminer proprement
-  son exécution, en s'assurant que tous les messages en attente dans le tampon sont
-  envoyés avant de quitter (`producer.Flush`).
-*/
-
 package main
 
 import (
@@ -24,50 +9,8 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/google/uuid"
 )
 
-// deliveryReport traite les événements de livraison des messages envoyés par le producteur Kafka.
-// Il s'exécute dans une goroutine dédiée pour ne pas bloquer le flux principal de production.
-//
-// Pour chaque message, il vérifie si la livraison a réussi ou échoué et affiche
-// un message de confirmation ou d'erreur en conséquence. C'est un élément clé
-// pour s'assurer de la fiabilité de la production.
-//
-// Paramètres:
-//   deliveryChan (chan kafka.Event): Un canal qui reçoit les événements de livraison
-//     (kafka.Message) de la part du producteur.
-func deliveryReport(deliveryChan chan kafka.Event) {
-	for e := range deliveryChan {
-		m := e.(*kafka.Message)
-		if m.TopicPartition.Error != nil {
-			fmt.Printf("❌ La livraison du message a échoué: %v\n", m.TopicPartition.Error)
-		} else {
-			fmt.Printf("✅ Message livré avec succès au topic %s (partition %d) à l'offset %d\n",
-				*m.TopicPartition.Topic,
-				m.TopicPartition.Partition,
-				m.TopicPartition.Offset)
-			// Décommenter la ligne suivante pour afficher le contenu de chaque message livré.
-			// fmt.Printf("   Contenu: %s\n", string(m.Value))
-		}
-	}
-}
-
-// main est le point d'entrée du programme producteur.
-//
-// Son cycle de vie est le suivant :
-// 1. Configure et initialise une nouvelle instance de producteur Kafka.
-// 2. Lance une goroutine pour gérer les rapports de livraison de manière asynchrone.
-// 3. Met en place un canal pour intercepter les signaux d'arrêt du système (Ctrl+C),
-//    permettant un arrêt propre.
-// 4. Entre dans une boucle infinie pour :
-//    a. Générer des données de commande enrichies et complètes.
-//    b. Sérialiser la commande en JSON.
-//    c. Envoyer le message au topic Kafka 'orders'.
-//    d. Marquer une pause de 2 secondes entre chaque envoi.
-// 5. Si un signal d'arrêt est reçu, la boucle se termine.
-// 6. Avant de quitter, appelle `producer.Flush()` pour s'assurer que tous les messages
-//    qui sont encore dans le tampon du producteur sont envoyés à Kafka.
 func main() {
 	// Configuration du producteur Kafka.
 	// "bootstrap.servers" est l'adresse du (ou des) broker(s) Kafka.
@@ -88,21 +31,37 @@ func main() {
 	deliveryChan := make(chan kafka.Event, 10000)
 	go deliveryReport(deliveryChan)
 
-	// Met en place la gestion des signaux pour un arrêt propre.
+	topic := "orders"
+
+	// --- Mode d'Exécution Spécial pour les Tests d'Intégration ---
+	// Vérifie la présence d'une variable d'environnement pour activer un mode
+	// où un seul message est envoyé. C'est une technique courante pour rendre
+	// les applications testables en intégration sans modifier leur code principal de manière invasive.
+	if os.Getenv("SINGLE_MESSAGE_MODE") == "true" {
+		payload := os.Getenv("SINGLE_MESSAGE_PAYLOAD")
+		if payload == "" {
+			fmt.Println("Erreur: SINGLE_MESSAGE_PAYLOAD ne doit pas être vide en mode single message")
+			os.Exit(1)
+		}
+		err = producer.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+			Value:          []byte(payload),
+		}, deliveryChan)
+		if err != nil {
+			fmt.Printf("Erreur lors de la production du message de test: %v\n", err)
+			os.Exit(1)
+		}
+		producer.Flush(15 * 1000) // Attendre la livraison
+		fmt.Println("✅ Message de test unique envoyé avec succès.")
+		return // Terminer le programme après l'envoi
+	}
+
+	// --- Exécution Normale ---
+	fmt.Println("🟢 Le producteur est démarré et prêt à envoyer des messages...")
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 
-	topic := "orders"
-	fmt.Println("🟢 Le producteur est démarré et prêt à envoyer des messages...")
-
 	// Utilisation de templates pour générer des données de commande variées.
-	type OrderTemplate struct {
-		User     string
-		Item     string
-		Quantity int
-		Price    float64
-	}
-
 	orderTemplates := []OrderTemplate{
 		{User: "client01", Item: "espresso", Quantity: 2, Price: 2.50},
 		{User: "client02", Item: "cappuccino", Quantity: 3, Price: 3.20},
@@ -126,65 +85,11 @@ func main() {
 			fmt.Println("\n⚠️  Signal d'arrêt reçu. Fin de la production de nouveaux messages...")
 			run = false
 		default:
-			// Création d'une commande enrichie basée sur un template.
+			// Étape 1: Créer une commande enrichie en utilisant la fonction dédiée.
 			template := orderTemplates[sequence%len(orderTemplates)]
-			
-			// Calculs financiers pour la commande.
-			itemTotal := float64(template.Quantity) * template.Price
-			tax := itemTotal * 0.20 // TVA de 20%
-			shippingFee := 2.50
-			total := itemTotal + tax + shippingFee
+			order := createOrder(sequence, template)
 
-			// Construction de l'objet Order complet avec toutes ses données.
-			order := Order{
-				OrderID:  uuid.New().String(),
-				Sequence: sequence,
-				Status:   "pending",
-				Items: []OrderItem{
-					{
-						ItemID:     fmt.Sprintf("item-%s", template.Item),
-						ItemName:   template.Item,
-						Quantity:   template.Quantity,
-						UnitPrice:  template.Price,
-						TotalPrice: itemTotal,
-					},
-				},
-				SubTotal:        itemTotal,
-				Tax:             tax,
-				ShippingFee:     shippingFee,
-				Total:           total,
-				Currency:        "EUR",
-				PaymentMethod:   "credit_card",
-				ShippingAddress: fmt.Sprintf("%d Rue de la Paix, 75000 Paris", sequence),
-				Metadata: OrderMetadata{
-					Timestamp:     time.Now().UTC().Format(time.RFC3339),
-					Version:       "1.1",
-					EventType:     "order.created",
-					Source:        "producer-service",
-					CorrelationID: uuid.New().String(),
-				},
-				CustomerInfo: CustomerInfo{
-					CustomerID:   template.User,
-					Name:         fmt.Sprintf("Client %s", template.User),
-					Email:        fmt.Sprintf("%s@example.com", template.User),
-					Phone:        "+33 6 00 00 00 00",
-					Address:      fmt.Sprintf("%d Rue de la Paix, 75000 Paris", sequence),
-					LoyaltyLevel: "silver",
-				},
-				InventoryStatus: []InventoryStatus{
-					{
-						ItemID:       fmt.Sprintf("item-%s", template.Item),
-						ItemName:     template.Item,
-						AvailableQty: 100 - template.Quantity,
-						ReservedQty:  template.Quantity,
-						UnitPrice:    template.Price,
-						InStock:      true,
-						Warehouse:    "PARIS-01",
-					},
-				},
-			}
-
-			// Sérialisation de l'objet Order en JSON.
+			// Étape 2: Sérialiser l'objet Order en JSON.
 			value, err := json.Marshal(order)
 			if err != nil {
 				fmt.Printf("Erreur de sérialisation JSON: %v\n", err)

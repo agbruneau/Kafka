@@ -25,6 +25,9 @@
 #    premier plan. Il commencera à générer et envoyer des messages.
 #    Le script se terminera lorsque le producteur sera arrêté (Ctrl+C).
 #
+# Note : Le moniteur de logs (`log_monitor.go`) doit être lancé manuellement
+#        dans un terminal séparé avec la commande : go run log_monitor.go
+#
 # ------------------------------------------------------------------------------
 
 # Active le mode "verbose" pour afficher chaque commande avant son exécution.
@@ -85,13 +88,7 @@ echo "🟢 Lancement du consommateur (tracker) en arrière-plan..."
 go run tracker.go order.go &
 echo $! > "$script_dir/tracker.pid"
 
-# Étape 6: Lancement du moniteur de logs en arrière-plan
-# Le moniteur de logs fournit une interface graphique pour surveiller les logs en temps réel.
-echo "📊 Lancement du moniteur de logs en arrière-plan..."
-go run log_monitor.go &
-echo $! > "$script_dir/log_monitor.pid"
-
-# Étape 7: Lancement du producteur (producer) au premier plan
+# Étape 6: Lancement du producteur (producer) au premier plan
 # Le script attendra ici jusqu'à ce que le producteur soit manuellement arrêté.
 echo "🟢 Lancement du producteur (producer) au premier plan..."
 go run producer.go order.go &

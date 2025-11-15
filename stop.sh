@@ -60,10 +60,9 @@ shutdown_process() {
 # Étape 1: Arrêter proprement les processus Go (producer PUIS tracker)
 echo "🔴 Arrêt séquentiel des processus applicatifs Go..."
 
-if [ -f "$script_dir/producer.pid" ] || [ -f "$script_dir/tracker.pid" ] || [ -f "$script_dir/log_monitor.pid" ]; then
+if [ -f "$script_dir/producer.pid" ] || [ -f "$script_dir/tracker.pid" ]; then
     producer_pid=""
     tracker_pid=""
-    log_monitor_pid=""
 
     if [ -f "$script_dir/producer.pid" ]; then
         producer_pid=$(cat "$script_dir/producer.pid")
@@ -81,14 +80,6 @@ if [ -f "$script_dir/producer.pid" ] || [ -f "$script_dir/tracker.pid" ] || [ -f
         fi
     fi
 
-    if [ -f "$script_dir/log_monitor.pid" ]; then
-        log_monitor_pid=$(cat "$script_dir/log_monitor.pid")
-        if ! kill -0 $log_monitor_pid 2>/dev/null; then
-            echo "   ⚠️  Le moniteur de logs (PID: $log_monitor_pid) n'est plus actif."
-            log_monitor_pid=""
-        fi
-    fi
-
     # 1. Arrêter le producer d'abord pour stopper l'envoi de nouveaux messages
     if [ -n "$producer_pid" ]; then
         echo "   1. Arrêt du producer..."
@@ -96,16 +87,9 @@ if [ -f "$script_dir/producer.pid" ] || [ -f "$script_dir/tracker.pid" ] || [ -f
         echo ""
     fi
 
-    # 2. Ensuite, arrêter le moniteur de logs
-    if [ -n "$log_monitor_pid" ]; then
-        echo "   2. Arrêt du moniteur de logs..."
-        shutdown_process "LogMonitor" $log_monitor_pid
-        echo ""
-    fi
-
-    # 3. Enfin, arrêter le tracker pour qu'il traite les messages restants
+    # 2. Ensuite, arrêter le tracker pour qu'il traite les messages restants
     if [ -n "$tracker_pid" ]; then
-        echo "   3. Arrêt du tracker..."
+        echo "   2. Arrêt du tracker..."
         shutdown_process "Tracker" $tracker_pid
         echo ""
     fi
@@ -121,34 +105,26 @@ if [ -f "$script_dir/producer.pid" ] || [ -f "$script_dir/tracker.pid" ] || [ -f
         echo "   ⚠️  Le tracker est toujours actif, arrêt forcé..."
         kill -KILL $tracker_pid 2>/dev/null || true
     fi
-    if [ -n "$log_monitor_pid" ] && kill -0 $log_monitor_pid 2>/dev/null; then
-        echo "   ⚠️  Le moniteur de logs est toujours actif, arrêt forcé..."
-        kill -KILL $log_monitor_pid 2>/dev/null || true
-    fi
 
     # Nettoyer les fichiers PID
-    rm -f "$script_dir/producer.pid" "$script_dir/tracker.pid" "$script_dir/log_monitor.pid"
+    rm -f "$script_dir/producer.pid" "$script_dir/tracker.pid"
 else
     echo "   ⚠️ Fichiers PID non trouvés. Tentative d'arrêt par pkill (moins fiable)..."
     pkill -TERM -f "go run producer.go order.go" 2>/dev/null || true
     sleep 5 # Laisse un peu de temps au producer
-    pkill -TERM -f "go run log_monitor.go" 2>/dev/null || true
-    sleep 2
     pkill -TERM -f "go run tracker.go order.go" 2>/dev/null || true
     sleep 2
     # Arrêt forcé si nécessaire
     pkill -KILL -f "go run producer.go order.go" 2>/dev/null || true
-    pkill -KILL -f "go run log_monitor.go" 2>/dev/null || true
     pkill -KILL -f "go run tracker.go order.go" 2>/dev/null || true
 fi
 
 # Vérification finale supplémentaire
 echo "   🔍 Vérification finale supplémentaire..."
 sleep 1
-if pgrep -f "go run producer.go order.go" >/dev/null 2>&1 || pgrep -f "go run tracker.go order.go" >/dev/null 2>&1 || pgrep -f "go run log_monitor.go" >/dev/null 2>&1; then
+if pgrep -f "go run producer.go order.go" >/dev/null 2>&1 || pgrep -f "go run tracker.go order.go" >/dev/null 2>&1; then
     echo "   ⚠️  Certains processus Go sont encore actifs, arrêt forcé..."
     pkill -KILL -f "go run producer.go order.go" 2>/dev/null || true
-    pkill -KILL -f "go run log_monitor.go" 2>/dev/null || true
     pkill -KILL -f "go run tracker.go order.go" 2>/dev/null || true
     sleep 1
 fi

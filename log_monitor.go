@@ -243,6 +243,15 @@ func processEvent(entry MonitorEventEntry) {
 	}
 	monitorMetrics.MessagesReceived++
 
+	// Recalculer les métriques en temps réel
+    uptime := time.Since(monitorMetrics.StartTime)
+    if uptime.Seconds() > 0 {
+        monitorMetrics.CurrentMessagesPerSec = float64(monitorMetrics.MessagesReceived) / uptime.Seconds()
+    }
+    if monitorMetrics.MessagesReceived > 0 {
+        monitorMetrics.CurrentSuccessRate = float64(monitorMetrics.MessagesProcessed) / float64(monitorMetrics.MessagesReceived) * 100
+    }
+
 	monitorMetrics.LastUpdateTime = time.Now()
 }
 

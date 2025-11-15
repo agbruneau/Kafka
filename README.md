@@ -2,32 +2,6 @@
 
 Ce projet est une démonstration d'un système de messagerie basé sur Apache Kafka, entièrement conteneurisé avec Docker. Il illustre plusieurs patrons d'architecture orientée événements (EDA) et bonnes pratiques de production à travers un cas d'utilisation simple : un producteur qui génère des commandes enrichies et un consommateur qui les traite de manière autonome et observable.
 
-## Schéma de l'Architecture
-
-flowchart TD
-    subgraph "Machine Hôte"
-        A[start.sh] --> B{Docker}
-        B --> C[Kafka Broker - Topic: orders]
-        A --> D[producer.go]
-        A --> E[tracker.go]
-        F[stop.sh] -- "Arrête" --> D & E & B
-        G[log_monitor.go] -- "Lit" --> H & I
-    end
-
-    subgraph "Flux de Données"
-        D -- "Produit message (JSON)" --> C
-        C -- "Consomme message" --> E
-    end
-
-    subgraph "Observabilité"
-        E -- "Écrit" --> H(tracker.log Logs structurés)
-        E -- "Écrit" --> I(tracker.events Audit Trail)
-    end
-
-    style A fill:#c9f,stroke:#333,stroke-width:2px
-    style F fill:#f99,stroke:#333,stroke-width:2px
-    style G fill:#9cf,stroke:#333,stroke-width:2px
-
 ## Patrons d'Architecture et Bonnes Pratiques
 
 Ce projet met en œuvre plusieurs patrons et pratiques essentiels pour les systèmes distribués.

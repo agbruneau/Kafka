@@ -236,170 +236,121 @@ func showHelp() {
 	fmt.Println(ColorYellow + "  Appuyez sur une touche pour continuer..." + Reset)
 }
 
+func drawBox(content []string, title string, width int, color string) {
+	// Top border
+	fmt.Printf("%s┌─ %s %s %s─┐%s\n", color, Bold, title, strings.Repeat("─", width-len(title)-5), Reset)
+
+	// Content
+	for _, line := range content {
+		// Ensure line does not exceed width
+		if len(line) > width-2 {
+			line = line[:width-5] + "..."
+		}
+		fmt.Printf("%s│ %s%s%s\n", color, Reset, line, strings.Repeat(" ", width-len(line)-1))
+	}
+
+	// Bottom border
+	fmt.Printf("%s└%s┘%s\n", color, strings.Repeat("─", width), Reset)
+}
+
 func displayReport(stats *Stats) {
-	// Repositionner le curseur en haut
+	width := 80
 	fmt.Print(HomeCursor)
 
-	// En-tête fixe (comme top)
+	// Header
 	timeStr := time.Now().Format("15:04:05")
-	headerWidth := 80
-	padding := (headerWidth - len("KAFKA LOG ANALYZER") - len(timeStr) - 3) / 2
-	header := fmt.Sprintf("%s%s%s KAFKA LOG ANALYZER - %s %s%s%s",
-		Bold+ColorCyan+BgBlue,
-		strings.Repeat(" ", padding),
-		strings.Repeat(" ", padding),
-		timeStr,
-		strings.Repeat(" ", padding),
-		strings.Repeat(" ", padding),
-		Reset)
-	fmt.Print(header)
-	fmt.Print(ClearLine + "\r\n")
+	headerTitle := "ANALYSEUR DE LOGS KAFKA"
+	headerPadding := (width - len(headerTitle) - len(timeStr) - 3)
+	fmt.Printf("%s%s%s %s %s%s\n", BgBlue+Bold, strings.Repeat(" ", 2), headerTitle, timeStr, strings.Repeat(" ", headerPadding), Reset)
 
-	// Ligne de séparation
-	fmt.Println(ColorCyan + strings.Repeat("═", 80) + Reset)
-	fmt.Println()
-
-	// Statistiques principales en tableau formaté
-	fmt.Printf("%s%s%-25s %-25s %-25s%s\n", Bold, ColorGreen, "LOGS", "ÉVÉNEMENTS", "PERFORMANCE", Reset)
-	fmt.Println(strings.Repeat("─", 80))
-
-	// Ligne 1: Totaux
-	fmt.Printf("  Total:     %s%-15d%s  Reçus:     %s%-15d%s  Débit:     ",
-		Bold, stats.TotalLogs, Reset,
-		Bold, stats.TotalEvents, Reset)
-	if stats.LastMetrics != nil {
-		if msgPerSec, ok := stats.LastMetrics.Metadata["messages_per_second"].(string); ok {
-			fmt.Printf("%s%s msg/s%s\n", Bold+ColorCyan, msgPerSec, Reset)
-		} else {
-			fmt.Printf("%sN/A%s\n", ColorYellow, Reset)
-		}
-	} else {
-		fmt.Printf("%sN/A%s\n", ColorYellow, Reset)
-	}
-
-	// Ligne 2: INFO / Traités / Taux
-	fmt.Printf("  INFO:      %s%-15d%s  Traités:   %s%-15d%s  Taux:      ",
-		ColorGreen, stats.InfoLogs, Reset,
-		ColorGreen, stats.ProcessedEvents, Reset)
-	if stats.LastMetrics != nil {
-		if successRate, ok := stats.LastMetrics.Metadata["success_rate_percent"].(string); ok {
-			fmt.Printf("%s%s%%%s\n", Bold+ColorGreen, successRate, Reset)
-		} else {
-			fmt.Printf("%sN/A%s\n", ColorYellow, Reset)
-		}
-	} else {
-		fmt.Printf("%sN/A%s\n", ColorYellow, Reset)
-	}
-
-	// Ligne 3: ERROR / Échecs
-	fmt.Printf("  ERROR:     %s%-15d%s  Échecs:    %s%-15d%s\n",
-		ColorRed, stats.ErrorLogs, Reset,
-		ColorRed, stats.FailedEvents, Reset)
-
-	// Barre de progression pour le taux de succès
+	// Panneau 1: Santé du système (Général + Erreurs)
+	var healthContent []string
+	healthContent = append(healthContent, fmt.Sprintf("Logs: %s%d%s Total, %s%d%s Info, %s%d%s Err",
+		Bold, stats.TotalLogs, Reset, ColorGreen, stats.InfoLogs, Reset, ColorRed, stats.ErrorLogs, Reset))
+	healthContent = append(healthContent, fmt.Sprintf("Événements: %s%d%s Reçus, %s%d%s Traités, %s%d%s Échecs",
+		Bold, stats.TotalEvents, Reset, ColorGreen, stats.ProcessedEvents, Reset, ColorRed, stats.FailedEvents, Reset))
 	if stats.TotalEvents > 0 {
 		successRate := float64(stats.ProcessedEvents) / float64(stats.TotalEvents) * 100
-		bar := progressBar(int(successRate), 40, ColorGreen)
-		fmt.Printf("  Taux de succès: %s %s%.1f%%%s\n", bar, Bold, successRate, Reset)
+		bar := progressBar(int(successRate), width-18, ColorGreen)
+		healthContent = append(healthContent, fmt.Sprintf("Taux Succès: %s %s%.1f%%%s", bar, Bold, successRate, Reset))
 	}
-
-	fmt.Println()
-
-	// Section Statut des Erreurs
-	fmt.Printf("%s%s STATUT DES ERREURS%s\n", Bold, ColorRed, Reset)
-	fmt.Println(strings.Repeat("─", 80))
 	if stats.ErrorLogs > 0 {
-		statusColor := ColorGreen
-		statusIcon := "✅"
-		statusText := "Aucune erreur réelle"
-		if stats.RealErrors > 0 {
-			statusColor = ColorRed
-			statusIcon = "❌"
-			statusText = fmt.Sprintf("%d erreur(s) réelle(s)", stats.RealErrors)
+		statusText := fmt.Sprintf("%s%d erreurs réelles%s", ColorRed, stats.RealErrors, Reset)
+		if stats.RealErrors == 0 {
+			statusText = fmt.Sprintf("%sAucune erreur réelle%s", ColorGreen, Reset)
 		}
-		fmt.Printf("  %s%s %s%s", Bold+statusColor, statusIcon, statusText, Reset)
-		if stats.ShutdownErrors > 0 {
-			fmt.Printf("  |  %s%d erreur(s) d'arrêt (normal)%s", ColorYellow, stats.ShutdownErrors, Reset)
-		}
-		fmt.Println()
+		healthContent = append(healthContent, fmt.Sprintf("Statut Err: %s | %s%d erreurs d'arrêt%s",
+			statusText, ColorYellow, stats.ShutdownErrors, Reset))
 	} else {
-		fmt.Printf("  %s✅ Aucune erreur détectée%s\n", Bold+ColorGreen, Reset)
+		healthContent = append(healthContent, fmt.Sprintf("Statut Err: %s✅ Aucune erreur détectée%s", Bold+ColorGreen, Reset))
 	}
+	drawBox(healthContent, "Santé du Système", width-2, ColorCyan)
 
-	// Statistiques métier
+	// Panneau 2: Statistiques métier
+	var businessContent []string
 	if stats.ProcessedEvents > 0 {
-		fmt.Println()
-		fmt.Printf("%s%s STATISTIQUES MÉTIER%s\n", Bold, ColorMagenta, Reset)
-		fmt.Println(strings.Repeat("─", 80))
-		fmt.Printf("  Chiffre d'affaires total: %s%10.2f EUR%s  |  Panier moyen: %s%10.2f EUR%s\n",
-			Bold+ColorGreen, stats.BusinessStats.TotalAmount, Reset,
-			Bold+ColorGreen, stats.BusinessStats.AvgAmount, Reset)
+		businessContent = append(businessContent, fmt.Sprintf("CA: %s%.2f EUR%s | Panier moyen: %s%.2f EUR%s",
+			Bold+ColorGreen, stats.BusinessStats.TotalAmount, Reset, Bold+ColorGreen, stats.BusinessStats.AvgAmount, Reset))
 
-		// Top clients
-		if len(stats.BusinessStats.CustomerOrders) > 0 {
-			type customerCount struct {
-				id    string
-				count int
-			}
-			customers := make([]customerCount, 0, len(stats.BusinessStats.CustomerOrders))
-			for id, count := range stats.BusinessStats.CustomerOrders {
-				customers = append(customers, customerCount{id, count})
-			}
-			sort.Slice(customers, func(i, j int) bool {
-				return customers[i].count > customers[j].count
-			})
-
-			fmt.Print("  Top 5 clients: ")
-			for i, c := range customers {
-				if i >= 5 {
-					break
-				}
-				if i > 0 {
-					fmt.Print("  |  ")
-				}
-				fmt.Printf("%s%s%s (%d)", ColorCyan, c.id, Reset, c.count)
-			}
-			fmt.Println()
+		// Top 3 Products by Quantity
+		type productCount struct {
+			name  string
+			count int
 		}
-	}
-
-	// Dernières activités
-	fmt.Println()
-	fmt.Printf("%s%s DERNIÈRES ACTIVITÉS%s\n", Bold, ColorYellow, Reset)
-	fmt.Println(strings.Repeat("─", 80))
-	if len(stats.LastLogs) > 0 {
-		for i, log := range stats.LastLogs {
-			if i >= 5 {
+		products := make([]productCount, 0, len(stats.BusinessStats.ProductQuantities))
+		for name, count := range stats.BusinessStats.ProductQuantities {
+			products = append(products, productCount{name, count})
+		}
+		sort.Slice(products, func(i, j int) bool { return products[i].count > products[j].count })
+		var topProducts string
+		for i, p := range products {
+			if i >= 3 {
 				break
 			}
+			topProducts += fmt.Sprintf("%s%s%s(%d) ", ColorCyan, p.name, Reset, p.count)
+		}
+		businessContent = append(businessContent, fmt.Sprintf("Top Produits (Qt): %s", topProducts))
+
+		// Payment Methods
+		var paymentMethods string
+		for method, count := range stats.BusinessStats.PaymentMethods {
+			paymentMethods += fmt.Sprintf("%s%s%s(%d) ", ColorYellow, method, Reset, count)
+		}
+		businessContent = append(businessContent, fmt.Sprintf("Méthodes Paiement: %s", paymentMethods))
+	}
+	drawBox(businessContent, "Statistiques Métier", width-2, ColorMagenta)
+
+	// Panneau 3: Dernières activités (3 dernières)
+	var activityContent []string
+	if len(stats.LastLogs) > 0 {
+		start := len(stats.LastLogs) - 3
+		if start < 0 {
+			start = 0
+		}
+		for _, log := range stats.LastLogs[start:] {
 			levelColor := ColorGreen
-			levelIcon := "✓"
 			if log.Level == "ERROR" {
 				levelColor = ColorRed
-				levelIcon = "✗"
 			}
-			timeStr := log.Timestamp
-			if len(timeStr) > 19 {
-				timeStr = timeStr[11:19] // Extraire juste l'heure
-			}
-			fmt.Printf("  [%s] %s%s%s[%s]%s  %s\n",
-				timeStr, levelColor, levelIcon, Reset, log.Level, Reset, log.Message)
+			timeStr := log.Timestamp[11:19]
+			activityContent = append(activityContent, fmt.Sprintf("[%s] %s[%s]%s %s",
+				timeStr, levelColor, log.Level, Reset, log.Message))
 		}
 	} else {
-		fmt.Printf("  %sAucune activité récente%s\n", ColorYellow, Reset)
+		activityContent = append(activityContent, fmt.Sprintf("%sAucune activité récente%s", ColorYellow, Reset))
 	}
+	drawBox(activityContent, "Dernières Activités", width-2, ColorYellow)
 
-	// Ligne de commandes (comme top)
-	fmt.Println()
-	fmt.Println(strings.Repeat("═", 80))
-	fmt.Printf("%s%sTouches:%s  %sq%s:quitter  |  %sr%s:rafraîchir  |  %sh%s:aide%s\n",
+	// Footer
+	fmt.Println(strings.Repeat("═", width))
+	fmt.Printf("%s%sTouches:%s %sq%s:quitter | %sr%s:rafraîchir | %sh%s:aide%s\n",
 		ColorYellow, Bold, Reset,
 		ColorCyan, Reset,
 		ColorCyan, Reset,
 		ColorCyan, Reset, Reset)
 
-	// Effacer le reste de l'écran
-	fmt.Print(ClearLine)
+	// Clear the rest of the screen to avoid artifacts on resize
+	fmt.Print(ClearScreen[2:]) // Use partial clear to avoid flicker
 }
 
 func progressBar(value, width int, color string) string {

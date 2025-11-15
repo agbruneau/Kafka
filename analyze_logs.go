@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -236,63 +237,78 @@ func showHelp() {
 	fmt.Println(ColorYellow + "  Appuyez sur une touche pour continuer..." + Reset)
 }
 
-func drawBox(content []string, title string, width int, color string) {
+func stripAnsi(str string) string {
+	const ansi = "[\u001B\u009B][[\\]()#;?]*.?[a-zA-Z0-9]"
+	var re = regexp.MustCompile(ansi)
+	return re.ReplaceAllString(str, "")
+}
+
+// formatBox formats content into a box with a title and border, returning it as a slice of strings.
+func formatBox(content []string, title string, width int, color string) []string {
+	var box []string
 	// Top border
-	fmt.Printf("%s┌─ %s %s %s─┐%s\n", color, Bold, title, strings.Repeat("─", width-len(title)-5), Reset)
+	box = append(box, fmt.Sprintf("%s┌─ %s %s %s─┐%s", color, Bold, title, strings.Repeat("─", width-len(title)-5), Reset))
 
 	// Content
 	for _, line := range content {
-		// Ensure line does not exceed width
-		if len(line) > width-2 {
-			line = line[:width-5] + "..."
-		}
-		fmt.Printf("%s│ %s%s%s\n", color, Reset, line, strings.Repeat(" ", width-len(line)-1))
+		paddedLine := line + strings.Repeat(" ", width-len(stripAnsi(line))-1)
+		box = append(box, fmt.Sprintf("%s│ %s%s%s", color, Reset, paddedLine, Reset))
 	}
 
 	// Bottom border
-	fmt.Printf("%s└%s┘%s\n", color, strings.Repeat("─", width), Reset)
+	box = append(box, fmt.Sprintf("%s└%s┘%s", color, strings.Repeat("─", width), Reset))
+	return box
 }
 
 func displayReport(stats *Stats) {
 	width := 80
+	height := 24
 	fmt.Print(HomeCursor)
 
 	// Header
 	timeStr := time.Now().Format("15:04:05")
 	headerTitle := "ANALYSEUR DE LOGS KAFKA"
 	headerPadding := (width - len(headerTitle) - len(timeStr) - 3)
-	fmt.Printf("%s%s%s %s %s%s\n", BgBlue+Bold, strings.Repeat(" ", 2), headerTitle, timeStr, strings.Repeat(" ", headerPadding), Reset)
+	header := fmt.Sprintf("%s%s%s %s %s%s", BgBlue+Bold, strings.Repeat(" ", 2), headerTitle, timeStr, strings.Repeat(" ", headerPadding), Reset)
+	fmt.Println(header)
 
-	// Panneau 1: Santé du système (Général + Erreurs)
+	// Prepare content for columns
+	colWidth1 := 45
+	colWidth2 := width - colWidth1 - 1
+
+	// --- Column 1: Health & Events ---
 	var healthContent []string
 	healthContent = append(healthContent, fmt.Sprintf("Logs: %s%d%s Total, %s%d%s Info, %s%d%s Err",
 		Bold, stats.TotalLogs, Reset, ColorGreen, stats.InfoLogs, Reset, ColorRed, stats.ErrorLogs, Reset))
-	healthContent = append(healthContent, fmt.Sprintf("Événements: %s%d%s Reçus, %s%d%s Traités, %s%d%s Échecs",
-		Bold, stats.TotalEvents, Reset, ColorGreen, stats.ProcessedEvents, Reset, ColorRed, stats.FailedEvents, Reset))
-	if stats.TotalEvents > 0 {
-		successRate := float64(stats.ProcessedEvents) / float64(stats.TotalEvents) * 100
-		bar := progressBar(int(successRate), width-18, ColorGreen)
-		healthContent = append(healthContent, fmt.Sprintf("Taux Succès: %s %s%.1f%%%s", bar, Bold, successRate, Reset))
-	}
 	if stats.ErrorLogs > 0 {
 		statusText := fmt.Sprintf("%s%d erreurs réelles%s", ColorRed, stats.RealErrors, Reset)
 		if stats.RealErrors == 0 {
 			statusText = fmt.Sprintf("%sAucune erreur réelle%s", ColorGreen, Reset)
 		}
-		healthContent = append(healthContent, fmt.Sprintf("Statut Err: %s | %s%d erreurs d'arrêt%s",
+		healthContent = append(healthContent, fmt.Sprintf("Statut Err: %s | %s%d arrêt%s",
 			statusText, ColorYellow, stats.ShutdownErrors, Reset))
 	} else {
-		healthContent = append(healthContent, fmt.Sprintf("Statut Err: %s✅ Aucune erreur détectée%s", Bold+ColorGreen, Reset))
+		healthContent = append(healthContent, fmt.Sprintf("Statut Err: %s✅ Aucune erreur%s", Bold+ColorGreen, Reset))
 	}
-	drawBox(healthContent, "Santé du Système", width-2, ColorCyan)
+	healthContent = append(healthContent, "") // Spacer
+	healthContent = append(healthContent, fmt.Sprintf("Événements: %s%d%s Reçus", Bold, stats.TotalEvents, Reset))
+	healthContent = append(healthContent, fmt.Sprintf("  %s%d%s Traités, %s%d%s Échecs",
+		ColorGreen, stats.ProcessedEvents, Reset, ColorRed, stats.FailedEvents, Reset))
+	if stats.TotalEvents > 0 {
+		successRate := float64(stats.ProcessedEvents) / float64(stats.TotalEvents) * 100
+		bar := progressBar(int(successRate), colWidth1-18, ColorGreen)
+		healthContent = append(healthContent, fmt.Sprintf("Taux Succès: %s %s%.1f%%%s", bar, Bold, successRate, Reset))
+	}
+	healthBox := formatBox(healthContent, "Santé et Événements", colWidth1-2, ColorCyan)
 
-	// Panneau 2: Statistiques métier
+	// --- Column 2: Business Stats ---
 	var businessContent []string
 	if stats.ProcessedEvents > 0 {
-		businessContent = append(businessContent, fmt.Sprintf("CA: %s%.2f EUR%s | Panier moyen: %s%.2f EUR%s",
-			Bold+ColorGreen, stats.BusinessStats.TotalAmount, Reset, Bold+ColorGreen, stats.BusinessStats.AvgAmount, Reset))
+		businessContent = append(businessContent, fmt.Sprintf("CA Total: %s%.2f EUR%s", Bold+ColorGreen, stats.BusinessStats.TotalAmount, Reset))
+		businessContent = append(businessContent, fmt.Sprintf("Panier Moyen: %s%.2f EUR%s", Bold, stats.BusinessStats.AvgAmount, Reset))
+		businessContent = append(businessContent, "")
 
-		// Top 3 Products by Quantity
+		// Top 2 Products by Quantity
 		type productCount struct {
 			name  string
 			count int
@@ -302,56 +318,88 @@ func displayReport(stats *Stats) {
 			products = append(products, productCount{name, count})
 		}
 		sort.Slice(products, func(i, j int) bool { return products[i].count > products[j].count })
-		var topProducts string
+		businessContent = append(businessContent, Bold+"Top Produits (Qt):"+Reset)
 		for i, p := range products {
-			if i >= 3 {
+			if i >= 2 { // Keep it short for the smaller panel
 				break
 			}
-			topProducts += fmt.Sprintf("%s%s%s(%d) ", ColorCyan, p.name, Reset, p.count)
+			businessContent = append(businessContent, fmt.Sprintf(" %s- %s: %d%s", ColorCyan, p.name, p.count, Reset))
 		}
-		businessContent = append(businessContent, fmt.Sprintf("Top Produits (Qt): %s", topProducts))
+		businessContent = append(businessContent, "") // Spacer
 
 		// Payment Methods
-		var paymentMethods string
+		businessContent = append(businessContent, Bold+"Méthodes Paiement:"+Reset)
 		for method, count := range stats.BusinessStats.PaymentMethods {
-			paymentMethods += fmt.Sprintf("%s%s%s(%d) ", ColorYellow, method, Reset, count)
+			businessContent = append(businessContent, fmt.Sprintf(" %s- %s: %d%s", ColorYellow, method, count, Reset))
 		}
-		businessContent = append(businessContent, fmt.Sprintf("Méthodes Paiement: %s", paymentMethods))
+	} else {
+		businessContent = append(businessContent, "Aucune donnée métier.")
 	}
-	drawBox(businessContent, "Statistiques Métier", width-2, ColorMagenta)
+	businessBox := formatBox(businessContent, "Statistiques Métier", colWidth2-2, ColorMagenta)
 
-	// Panneau 3: Dernières activités (3 dernières)
+	// --- Draw Columns ---
+	maxBoxHeight := len(healthBox)
+	if len(businessBox) > maxBoxHeight {
+		maxBoxHeight = len(businessBox)
+	}
+
+	for i := 0; i < maxBoxHeight; i++ {
+		line1 := ""
+		if i < len(healthBox) {
+			line1 = healthBox[i]
+		} else {
+			line1 = strings.Repeat(" ", colWidth1)
+		}
+
+		line2 := ""
+		if i < len(businessBox) {
+			line2 = businessBox[i]
+		} else {
+			line2 = strings.Repeat(" ", colWidth2)
+		}
+		fmt.Printf("%s %s\n", line1, line2)
+	}
+
+	// --- Bottom Panel: Activity & Errors ---
 	var activityContent []string
 	if len(stats.LastLogs) > 0 {
-		start := len(stats.LastLogs) - 3
-		if start < 0 {
-			start = 0
-		}
-		for _, log := range stats.LastLogs[start:] {
+		// Last 5 logs
+		for _, log := range stats.LastLogs {
 			levelColor := ColorGreen
 			if log.Level == "ERROR" {
 				levelColor = ColorRed
 			}
 			timeStr := log.Timestamp[11:19]
-			activityContent = append(activityContent, fmt.Sprintf("[%s] %s[%s]%s %s",
-				timeStr, levelColor, log.Level, Reset, log.Message))
+			msg := fmt.Sprintf("[%s] %s[%s]%s %s", timeStr, levelColor, log.Level, Reset, log.Message)
+			if len(stripAnsi(msg)) > width-4 {
+				msg = msg[:width-7] + "..."
+			}
+			activityContent = append(activityContent, msg)
 		}
 	} else {
 		activityContent = append(activityContent, fmt.Sprintf("%sAucune activité récente%s", ColorYellow, Reset))
 	}
-	drawBox(activityContent, "Dernières Activités", width-2, ColorYellow)
+	activityBox := formatBox(activityContent, "Dernières Activités", width-2, ColorYellow)
 
-	// Footer
+	for _, line := range activityBox {
+		fmt.Println(line)
+	}
+
+	// --- Footer & Screen Clearing ---
+	// Clear remaining lines
+	linesDrawn := 1 + maxBoxHeight + len(activityBox)
+	for i := linesDrawn; i < height-2; i++ {
+		fmt.Println(ClearLine)
+	}
+
 	fmt.Println(strings.Repeat("═", width))
 	fmt.Printf("%s%sTouches:%s %sq%s:quitter | %sr%s:rafraîchir | %sh%s:aide%s\n",
 		ColorYellow, Bold, Reset,
 		ColorCyan, Reset,
 		ColorCyan, Reset,
 		ColorCyan, Reset, Reset)
-
-	// Clear the rest of the screen to avoid artifacts on resize
-	fmt.Print(ClearScreen[2:]) // Use partial clear to avoid flicker
 }
+
 
 func progressBar(value, width int, color string) string {
 	if value > 100 {
